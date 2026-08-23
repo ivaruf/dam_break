@@ -247,8 +247,8 @@ export const CONFIG = {
     labelFg: '#dfe9f0',
 
     // water
-    waterDeep: '#0b3a68',
-    waterMid: '#1c6fb4',
+    waterDeep: '#07294f',               // richer, colder deep water
+    waterMid: '#1b6aae',
     waterShallow: '#49a8e0',
     waterAlpha: 0.74,                   // deep water: translucent ENOUGH that the
                                         // submerged dam stays inspectable
@@ -270,8 +270,79 @@ export const CONFIG = {
     foamPx: 2,
     foamChance: 0.35,                   // fraction of fast cells that carry a streak
     foamDriftHz: 3,                     // how often the streak pattern re-hashes
+    bedShadow: 'rgba(4, 14, 24, 0.34)', // contact shading where water meets the bed
+    bedShadowPx: 7,                     // device px of that soft band
     smoothPasses: 2,
     minSpanCells: 1,
+
+    // surface sheen: a sky reflection sitting just under the waterline
+    waterSheen: '#cfefff',
+    waterSheenAlpha: 0.13,
+    waterSheenPx: 3.5,                  // device px of sheen band under the line
+    waterShoreAlpha: 0.30,              // alpha at the very surface (shallows show the bed)
+
+    // ---- OVERTOPPING NAPPE (deterministic, drawn from water.weirFlow) ----
+    // One translucent sheet per contiguous overtopping run, on a ballistic
+    // trajectory from the crest to the toe. Never particles: a cloud of sprites
+    // at the dam face is exactly what hid the structure before.
+    nappeMinFlow: 0.015,                // m²/s of weir flow before a sheet appears
+    nappeColor: '#bfe6ff',
+    nappeAlphaTop: 0.60,                // at the crest
+    nappeAlphaToe: 0.22,                // where it lands
+    nappeMinTh: 0.20,                   // m sheet thickness clamp
+    nappeMaxTh: 2.0,
+    nappeMaxVel: 7.5,                   // m/s cap so a huge head still pours down the
+                                        // face instead of being launched off it
+    nappeMinPx: 11,                     // device px: a hydraulically-correct sheet can
+                                        // be 3 px thin and then reads as a wire, not water
+    nappeVelCoeff: 0.55,                // × sqrt(2 g H): lower hugs the face,
+                                        // which reads as pouring rather than launching
+    nappeSteps: 16,                      // trajectory samples
+    nappeMaxRun: 26,                    // m before the sheet is abandoned
+    nappeEdge: 'rgba(226, 244, 255, 0.55)',   // bright lip at the crest
+    toeFoamColor: 'rgba(226, 244, 255, 0.30)',
+    toeFoamR: 0.55,                     // m foam radius at the toe, × flow scale
+
+    // ---- LEAK / BREACH JETS (deterministic, from water.gapFlow + blocked) --
+    jetMinFlow: 0.012,                  // m²/s of orifice flow before a jet appears
+    jetColor: '#9ed4fb',
+    jetAlphaNear: 0.70,                 // at the gap mouth
+    jetAlphaFar: 0.20,                  // at the landing point
+    jetMinTh: 0.06,                     // m
+    jetMaxTh: 0.8,
+    jetMinPx: 7,                        // device px floor, same reason as nappeMinPx
+    jetVelCoeff: 0.9,                   // × sqrt(2 g head)
+    jetSteps: 14,
+    jetMaxDraw: 3,                      // only the biggest gaps get a jet: a lattice
+                                        // has many tiny ones and a spider-web of
+                                        // hairline arcs reads as noise, not a leak
+    jetMaxRun: 34,                      // m
+    jetSplashR: 0.5,                    // m, × flow scale
+    jetSplashAlpha: 0.34,
+    jetCore: 'rgba(255, 255, 255, 0.35)',  // bright centreline of a hard jet
+    jetHardFlow: 0.6,                   // m²/s where a jet reads as "hard"
+
+    // breach attention cue (decorative, effects.js)
+    ringLife: 0.9,                      // seconds of REAL time (not sim time)
+    ringCooldown: 1.2,                  // s between cues anywhere (they must stay rare)
+    ringSiteMemory: 6,                  // s a site stays "already announced"
+    maxRings: 2,                        // live cues; more than this is a scribble
+    ringColor: '#ffe4a0',
+    ringR0: 0.35,                       // m
+    ringR1: 2.6,                        // m
+    ringWidthPx: 3.5,
+    maxMist: 16,                         // hard cap on live mist sprites
+    maxFoam: 14,                        // ditto for foam puffs
+    foamSpriteAlpha: 0.24,              // per-sprite cap (was 0.8: they stacked white)
+    mistAlpha: 0.09,                    // per-sprite cap: bounds cumulative haze
+
+    // submerged structure readability
+    wetAlpha: 0.82,                     // alpha of members redrawn over the water
+    wetTint: '#8fd6ff',
+    wetTintMix: 0.18,                   // how far the wet tint pulls the material colour
+    stubColor: '#2b3138',               // torn ends left where a member broke
+    stubLen: 0.45,                      // m of stub drawn from each surviving node
+    stubJag: 3,                          // jagged segments per stub
 
     // effects
     particleGravity: 11,                // m/s² on decorative particles
@@ -281,8 +352,9 @@ export const CONFIG = {
     mistLife: 1.1,
     breakParticles: 18,
     impactParticles: 9,
-    breachRate: 44,                     // particles/s while a breach flows
-    overtopRate: 26,
+    breachRate: 9,                      // particles/s at a breach mouth: the JET is
+                                        // drawn by waterRenderer, this is only torn spray
+    overtopRate: 5,                     // ditto — the nappe sheet is the waterfall
     emitThrottle: 0.05,                 // s between re-emits from repeated events
     jetHold: 0.35,                      // s a breach/overtop keeps spraying after last event
     shakeDecay: 7,                      // exponential decay per second

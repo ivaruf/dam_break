@@ -115,7 +115,8 @@ function paletteFor(mat) {
     t[i] = rgbStr(lift(mixRgb(base, ten, f * 0.9), f * 0.28));   // cooler + brighter
     c[i] = rgbStr(lift(mixRgb(base, com, f * 0.9), f * 0.10));   // warmer
   }
-  const pal = { t, c };
+  const wetT = hexToRgb(R.wetTint) || { r: 143, g: 214, b: 255 };
+  const pal = { t, c, wet: rgbStr(mixRgb(base, wetT, R.wetTintMix)) };
   palettes[id] = pal;
   return pal;
 }
@@ -242,21 +243,99 @@ export function render(ctx, cam, S) {
   ctx.restore();
 }
 
-// Re-drawn on top of the water so a failing member is never hidden by 4 m of
-// blue. Called from waterRenderer.js at the end of its pass.
+// Re-drawn on top of the water. Two jobs:
+//   1. a member under stress is never hidden by 4 m of blue (or by a waterfall);
+//   2. the SUBMERGED structure stays readable at all — material identity and
+//      stress colour both — instead of dissolving into the reservoir.
+// Called from waterRenderer.js at the end of its pass.
 export function renderStressOverlay(ctx, cam, S) {
   if (!S || !S.structure) return;
   beginFrame(ctx, cam);
   const t = S.simTime || 0;
+  const w = S.water;
   const members = S.structure.members;
   ctx.save();
   ctx.lineCap = 'butt';
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
-    if (m.broken || !m.mat || m.load <= R.stressWarn) continue;
-    drawMember(ctx, m, t, false);
+    if (m.broken || !m.mat) continue;
+    const stressed = m.load > R.stressWarn;
+    const wet = w ? isSubmerged(w, m) : false;
+    if (!stressed && !wet) continue;      // dry and calm: the base pass has it
+    if (stressed) drawMember(ctx, m, t, false);
+    else drawWetMember(ctx, m);
   }
+  drawStubs(ctx, S.structure);
   ctx.restore();
+}
+
+// midpoint below the local water surface
+function isSubmerged(w, m) {
+  const mx = (m.a.x + m.b.x) * 0.5;
+  const i = Math.floor((mx - w.x0) / w.cellW);
+  if (i < 0 || i >= w.n) return false;
+  if (w.depth[i] <= 0.02) return false;
+  return (m.a.y + m.b.y) * 0.5 < w.bed[i] + w.depth[i];
+}
+
+// The material, pulled slightly toward a cool "wet" tint and drawn at high
+// alpha over the water fill: reads as underwater without losing which material
+// it is. Stress colour is unaffected because a stressed member takes the full
+// drawMember path instead.
+function drawWetMember(ctx, m) {
+  const mat = m.mat;
+  const width = Math.max(R.memberMinPx * dpr, (mat.thickness || 0.3) * zoom);
+  const sag = bowFor(m);
+  ctx.globalAlpha = R.wetAlpha;
+  if (width >= 5 * dpr) {
+    memberPath(ctx, m.a.x, m.a.y, m.b.x, m.b.y, sag);
+    ctx.strokeStyle = R.memberOutline;
+    ctx.lineWidth = width + R.memberOutlinePx * dpr * 2;
+    ctx.stroke();
+  }
+  memberPath(ctx, m.a.x, m.a.y, m.b.x, m.b.y, sag);
+  ctx.strokeStyle = paletteFor(mat).wet;
+  ctx.lineWidth = width;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+// Torn ends. A member that broke leaves the run as debris, so without this the
+// failure point just becomes empty space — and underwater that is invisible.
+// Short dark jagged stubs on the surviving nodes say "this snapped here".
+function drawStubs(ctx, structure) {
+  const members = structure.members;
+  let any = false;
+  ctx.beginPath();
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    if (!m.broken || !m.mat) continue;
+    const dx = m.b.x - m.a.x, dy = m.b.y - m.a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-4) continue;
+    const ux = dx / len, uy = dy / len;
+    const stub = Math.min(R.stubLen, len * 0.4);
+    const seed = hashStr(m.id);
+    for (let end = 0; end < 2; end++) {
+      const ox = end ? m.b.x : m.a.x;
+      const oy = end ? m.b.y : m.a.y;
+      const sx = end ? -ux : ux;
+      const sy = end ? -uy : uy;
+      ctx.moveTo(SX(ox), SY(oy));
+      for (let k = 1; k <= R.stubJag; k++) {
+        const f = k / R.stubJag;
+        const jag = (frac(seed, end * 17 + k) - 0.5) * stub * 0.5;
+        ctx.lineTo(SX(ox + sx * stub * f - sy * jag), SY(oy + sy * stub * f + sx * jag));
+      }
+      any = true;
+    }
+  }
+  if (!any) return;
+  ctx.strokeStyle = R.stubColor;
+  ctx.lineWidth = Math.max(1.5, 2.4 * dpr);
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.lineCap = 'butt';
 }
 
 // ---- backdrop -----------------------------------------------------------

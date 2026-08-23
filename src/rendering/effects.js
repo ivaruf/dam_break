@@ -30,6 +30,7 @@ const PKIND_FOAM = 1;
 const PKIND_MIST = 2;
 const PKIND_SPLINTER = 3;
 const PKIND_DUST = 4;
+const PKIND_RING = 5;
 
 // ---- pool (allocated once, at module load; never grown) -------------------
 
@@ -118,11 +119,14 @@ function findSoonestExpiringJet() {
 }
 
 function upsertJet(kind, x, y, flow) {
-  const key = Math.round(x * 10); // 0.1 m buckets: distinct dam faces stay distinct, float jitter doesn't
+  // key on x AND y: a second gap opening lower down the same face is a NEW
+  // event the player must notice, not a continuation of the one above it
+  const key = Math.round(x * 10) * 4096 + Math.round(y * 5);
   let slot = findActiveJet(kind, key);
   let isNew = false;
   if (!slot) { slot = findFreeJet(); isNew = true; }
   if (!slot) { slot = findSoonestExpiringJet(); isNew = true; }
+  if (isNew && kind === JKIND_BREACH && ringIsNew(x, y)) spawnRing(x, y);
 
   const R = CONFIG.render;
   if (!isNew && clock - slot.lastTouch < R.emitThrottle) {
@@ -138,6 +142,35 @@ function upsertJet(kind, x, y, flow) {
   slot.x = x; slot.y = y; slot.flow = flow;
   slot.until = clock + R.jetHold;
   slot.lastTouch = clock;
+}
+
+// ---- new-leak cue bookkeeping ----------------------------------------------
+// A breach re-announces itself every CONFIG.coupling.flowRepeat seconds and its
+// gap geometry drifts, so "is this a NEW leak?" needs a coarse, decaying site
+// memory rather than the exact jet key.
+const RING_SITES = 8;
+const ringKey = new Int32Array(RING_SITES);
+const ringSeen = new Float64Array(RING_SITES);
+let lastRingAt = -1e9;
+
+function ringIsNew(x, y) {
+  const R = CONFIG.render;
+  if (clock - lastRingAt < R.ringCooldown) return false;
+  if (countKind(PKIND_RING) >= R.maxRings) return false;
+  const key = (Math.round(x) * 4096 + Math.round(y)) | 0;
+  let free = -1;
+  for (let i = 0; i < RING_SITES; i++) {
+    if (ringKey[i] === key && clock - ringSeen[i] < R.ringSiteMemory) {
+      ringSeen[i] = clock;
+      return false;                       // this site already announced itself
+    }
+    if (free < 0 && clock - ringSeen[i] >= R.ringSiteMemory) free = i;
+  }
+  const slot = free >= 0 ? free : 0;
+  ringKey[slot] = key;
+  ringSeen[slot] = clock;
+  lastRingAt = clock;
+  return true;
 }
 
 // ---- camera shake -----------------------------------------------------------
@@ -273,8 +306,8 @@ function onWaterImpact({ x, y, speed, magnitude, dir }) {
     spawnFoam(
       x + (Math.random() - 0.5) * 0.6, y + Math.random() * 0.3,
       ((Math.random() - 0.5) * 0.4 + back * 0.5) * launch, launch * 0.25 + Math.random() * 0.5,
-      R.sprayLife * (1.0 + Math.random() * 0.5), R.foamPx * (2 + Math.random() * 1.5) * sizeMul,
-      0.4, 2, 0.8);
+      R.sprayLife * (1.0 + Math.random() * 0.5), R.foamPx * (1.1 + Math.random() * 0.9) * sizeMul,
+      0.4, 2, R.foamSpriteAlpha);
   }
 
   // Shake is for EVENTS, not for weather: water:impact fires every
@@ -317,7 +350,25 @@ function spawnDroplet(x, y, vx, vy, life, size, groundKill) {
   p.groundKill = groundKill;
 }
 
+// Expanding ring at a brand-new leak: the "look here" cue for a stress failure
+// that has just started passing water.
+function spawnRing(x, y) {
+  const R = CONFIG.render;
+  const p = allocParticle(PKIND_RING);
+  p.x = x; p.y = y; p.vx = 0; p.vy = 0;
+  p.maxLife = R.ringLife; p.life = R.ringLife;
+  p.size = 0;
+  p.rot = 0; p.rotV = 0;
+  p.color = R.ringColor;
+  p.maxAlpha = 0.95;
+  p.gravMul = 0; p.dragMul = 0;
+  p.groundKill = false;
+}
+
 function spawnFoam(x, y, vx, vy, life, size, gravMul, dragMul, alpha) {
+  // Capped like mist: foam is the other sprite that used to stack into an
+  // opaque white puff sitting on top of the dam.
+  if (countKind(PKIND_FOAM) >= CONFIG.render.maxFoam) return;
   const p = allocParticle(PKIND_FOAM);
   p.x = x; p.y = y; p.vx = vx; p.vy = vy;
   p.maxLife = life; p.life = life;
@@ -350,8 +401,18 @@ function spawnLandingFoam(j, dir, strength) {
     0.3, 2.5, 0.75);
 }
 
+function countKind(kind) {
+  let n = 0;
+  for (let i = 0; i < pool.length; i++) if (pool[i].alive && pool[i].kind === kind) n++;
+  return n;
+}
+
 function spawnMist(j, dir, strength) {
   const R = CONFIG.render;
+  // The nappe sheet in waterRenderer.js is the overtopping now. Mist is a thin
+  // garnish, and it is HARD CAPPED: unbounded sprite stacking at the dam face
+  // is what turned overtopping into an opaque white blob that hid the dam.
+  if (countKind(PKIND_MIST) >= R.maxMist) return;
   const p = allocParticle(PKIND_MIST);
   p.x = j.x + (Math.random() - 0.5) * 0.6;
   p.y = j.y + (Math.random() - 0.5) * 0.3;
@@ -359,10 +420,10 @@ function spawnMist(j, dir, strength) {
   p.vy = -(0.2 + Math.random() * 0.4);
   p.maxLife = R.mistLife * (0.7 + Math.random() * 0.6);
   p.life = p.maxLife;
-  p.size = R.foamPx * (6 + Math.random() * 5);
+  p.size = R.foamPx * (2.4 + Math.random() * 2);
   p.rot = 0; p.rotV = 0;
   p.color = R.foamColor;
-  p.maxAlpha = 0.32;
+  p.maxAlpha = R.mistAlpha;
   p.gravMul = 0.25;
   p.dragMul = 1.6;
   p.groundKill = false;
@@ -386,7 +447,7 @@ function updateJets(h) {
 
     if (j.kind === JKIND_BREACH) {
       const strength = clamp(Math.abs(j.flow) / C.breachFlowMin, 1, 5);
-      j.acc += R.breachRate * strength * h;
+      j.acc += R.breachRate * strength * h;   // rate is now a garnish (see CONFIG)
       while (j.acc >= 1) { j.acc -= 1; spawnBreachDroplet(j, dir, strength); }
       j.foamAcc += R.breachRate * 0.15 * strength * h;
       while (j.foamAcc >= 1) { j.foamAcc -= 1; spawnLandingFoam(j, dir, strength); }
@@ -411,6 +472,7 @@ function integrateParticles(h) {
   for (let i = 0; i < pool.length; i++) {
     const p = pool[i];
     if (!p.alive) continue;
+    if (p.kind === PKIND_RING) continue;   // aged in real time, see ageRings()
     p.life -= h;
     if (p.life <= 0) { p.alive = false; continue; }
     p.vy -= g * p.gravMul * h;
@@ -464,6 +526,8 @@ export function reset() {
   shakeAmp = 0;
   shakePhase = 0;
   clock = 0;
+  lastRingAt = -1e9;
+  ringSeen.fill(-1e9);
   const scene = getScene();
   if (scene && scene.camera) { scene.camera.shakeX = 0; scene.camera.shakeY = 0; }
 }
@@ -486,7 +550,19 @@ export function step(dt) {
     updateJets(h);
   }
   groundCull();
+  ageRings(dt);
   updateShake(scaled);
+}
+
+// The "a new leak just opened" cue must last the same wall-clock time at 1x and
+// at 4x, so it is aged by REAL dt rather than sim-scaled dt.
+function ageRings(dtReal) {
+  for (let i = 0; i < pool.length; i++) {
+    const p = pool[i];
+    if (!p.alive || p.kind !== PKIND_RING) continue;
+    p.life -= dtReal;
+    if (p.life <= 0) p.alive = false;
+  }
 }
 
 export function render(ctx, cam) {
@@ -506,6 +582,7 @@ export function render(ctx, cam) {
   drawKind(ctx, PKIND_DUST, camX, camY, zoom, hw, hh, shx, shy, w, h, margin, dpr);
   drawKind(ctx, PKIND_DROPLET, camX, camY, zoom, hw, hh, shx, shy, w, h, margin, dpr);
   drawKind(ctx, PKIND_SPLINTER, camX, camY, zoom, hw, hh, shx, shy, w, h, margin, dpr);
+  drawKind(ctx, PKIND_RING, camX, camY, zoom, hw, hh, shx, shy, w, h, margin, dpr);
   ctx.restore();
 }
 
@@ -550,6 +627,16 @@ function drawKind(ctx, kind, camX, camY, zoom, hw, hh, shx, shy, cw, ch, margin,
         ctx.beginPath();
         ctx.arc(sx, sy, s, 0, Math.PI * 2);
         ctx.fill();
+        break;
+      }
+      case PKIND_RING: {
+        const R = CONFIG.render;
+        const rr = (R.ringR0 + (R.ringR1 - R.ringR0) * age) * zoom;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(1, R.ringWidthPx * dpr * (1 - age * 0.6));
+        ctx.beginPath();
+        ctx.arc(sx, sy, rr, 0, Math.PI * 2);
+        ctx.stroke();
         break;
       }
       case PKIND_SPLINTER: {

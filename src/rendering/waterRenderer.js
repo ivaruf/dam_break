@@ -72,7 +72,9 @@ function buildRamps() {
   for (let i = 0; i <= RAMP_STEPS; i++) {
     const f = i / RAMP_STEPS;                       // 0 = puddle, 1 = deep water
     const a = R.waterShallowAlpha + (R.waterAlpha - R.waterShallowAlpha) * f;
-    top[i] = rgba(sh, R.waterShallowAlpha + (R.waterAlpha - R.waterShallowAlpha) * f * 0.45);
+    // The very surface stays translucent even in deep water: that is what lets
+    // the bed show through the shallows and the dam show through the reservoir.
+    top[i] = rgba(sh, R.waterShoreAlpha + (R.waterAlpha - R.waterShoreAlpha) * f * 0.35);
     mid[i] = rgba(mix(sh, md, f), a);
     bot[i] = rgba(mix(sh, dp, f), a);
   }
@@ -162,10 +164,271 @@ export function render(ctx, cam, water, S) {
     }
   }
 
+  // Pouring water is drawn INSIDE the terrain clip (it must not spill into the
+  // ground) but BEFORE the structure overlay, so the dam always ends up on top
+  // of its own waterfall rather than behind a cloud.
+  drawOvertop(ctx, water, S);
+  drawJets(ctx, water, S);
+
   ctx.restore();
 
   // failing members must stay readable through the water (see renderer.js)
   renderStressOverlay(ctx, cam, S);
+}
+
+// ---- pouring water: shared ballistic sheet -------------------------------
+
+// Reused point buffers: a sheet is rebuilt every frame, so it must not allocate.
+const MAXPT = 40;
+const px_ = new Float64Array(MAXPT);
+const py_ = new Float64Array(MAXPT);
+const qx_ = new Float64Array(MAXPT);
+const qy_ = new Float64Array(MAXPT);
+
+// Where a falling sheet is stopped: the ground, or standing water on it.
+function landingY(water, S, x) {
+  const g = S && S.terrain ? S.terrain.heightAt(x) : -Infinity;
+  const i = Math.floor((x - water.x0) / water.cellW);
+  const w = i >= 0 && i < water.n ? water.bed[i] + water.depth[i] : -Infinity;
+  return Math.max(g, w);
+}
+
+// Traces y = y0 − ½g t², x = x0 + vx t into px_/py_ (upper edge) and qx_/qy_
+// (lower edge, offset by `th` perpendicular to the velocity). Returns the
+// number of samples, or 0 if there is nothing to draw.
+function traceSheet(water, S, x0, y0, vx, th, steps, maxRun) {
+  const g = CONFIG.water.g;
+  const n = Math.min(steps, MAXPT - 1);
+  // how long until it lands, and how far it may run
+  let lowest = y0;
+  for (let k = 0; k <= 6; k++) {
+    const y = landingY(water, S, x0 + (vx >= 0 ? 1 : -1) * (maxRun * k) / 6);
+    if (y < lowest) lowest = y;
+  }
+  const fall = Math.max(0.4, y0 - lowest);
+  const tFall = Math.sqrt((2 * fall) / g) * 1.25;
+  const tRun = Math.abs(vx) > 0.25 ? maxRun / Math.abs(vx) : tFall;
+  const tEnd = Math.min(tFall, tRun);
+  if (!(tEnd > 0)) return 0;
+
+  let count = 0;
+  for (let i = 0; i <= n; i++) {
+    const t = (tEnd * i) / n;
+    const x = x0 + vx * t;
+    const y = y0 - 0.5 * g * t * t;
+    // velocity direction, for the perpendicular offset
+    const vy = -g * t;
+    const sp = Math.hypot(vx, vy) || 1;
+    const nx = -vy / sp, ny = vx / sp;
+    px_[count] = x; py_[count] = y;
+    qx_[count] = x + nx * th; qy_[count] = y + ny * th;
+    count++;
+    if (i > 0 && y <= landingY(water, S, x)) break;
+  }
+  return count;
+}
+
+// Fills the traced sheet with a top→toe alpha ramp. Returns nothing; callers
+// read px_/py_ for the landing point.
+function fillSheet(ctx, count, color, aTop, aToe) {
+  if (count < 2) return;
+  const x0s = SX(px_[0]), y0s = SY(py_[0]);
+  const x1s = SX(px_[count - 1]), y1s = SY(py_[count - 1]);
+  ctx.beginPath();
+  ctx.moveTo(x0s, y0s);
+  for (let i = 1; i < count; i++) ctx.lineTo(SX(px_[i]), SY(py_[i]));
+  for (let i = count - 1; i >= 0; i--) ctx.lineTo(SX(qx_[i]), SY(qy_[i]));
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(x0s, y0s, x1s, y1s);
+  const c = hexToRgb(color);
+  grad.addColorStop(0, rgba(c, aTop));
+  grad.addColorStop(1, rgba(c, aToe));
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
+
+// ---- overtopping ---------------------------------------------------------
+
+// One sheet per contiguous overtopping run. Merging matters: a separate sprite
+// or sheet per boundary would stack alpha into the opaque white blob this
+// replaces.
+function drawOvertop(ctx, water, S) {
+  const n = water.n;
+  if (!water.weirFlow) return;
+  const minF = R.nappeMinFlow;
+
+  let b = 1;
+  while (b < n) {
+    if (Math.abs(water.weirFlow[b]) <= minF) { b++; continue; }
+    // Find the CONTROLLING weir in this run (most flow) and use ITS crest. Using
+    // the run's lowest crest instead put the sheet halfway down the dam, because
+    // a lattice's blockage profile dips wherever a bay has no member in it.
+    let e = b, best = b, bestF = 0, signSum = 0;
+    while (e < n && Math.abs(water.weirFlow[e]) > minF) {
+      const f = water.weirFlow[e];
+      if (Math.abs(f) > bestF) { bestF = Math.abs(f); best = e; }
+      signSum += f;
+      e++;
+    }
+    const dir = signSum >= 0 ? 1 : -1;
+    const crest = water.crest[best];
+    const iUp = Math.max(0, Math.min(n - 1, (dir > 0 ? b - 1 : e)));
+    const upSurf = water.bed[iUp] + water.depth[iUp];
+    const H = Math.max(0, upSurf - crest);
+    if (H <= 0.01) { b = e; continue; }
+    const q = bestF;
+    const xLip = water.x0 + (dir > 0 ? e : b) * water.cellW;
+
+    // Thickness comes from the HEAD, not the flow: the depth of water riding
+    // over a broad crest is ~2/3 H, and that is what gives a pour its bulk.
+    const v0 = Math.min(R.nappeMaxVel, Math.sqrt(2 * CONFIG.water.g * H) * R.nappeVelCoeff) * dir;
+    const thFloor = Math.max(R.nappeMinTh, (R.nappeMinPx * dpr) / zoom);
+    const th = Math.max(thFloor, Math.min(R.nappeMaxTh, 0.6 * H));
+    const count = traceSheet(water, S, xLip, crest, v0, -th, R.nappeSteps, R.nappeMaxRun);
+
+    if (count >= 2) {
+      fillSheet(ctx, count, R.nappeColor, R.nappeAlphaTop, R.nappeAlphaToe);
+      // bright lip riding the crest, so the crest line stays legible
+      ctx.beginPath();
+      ctx.moveTo(SX(px_[0]), SY(py_[0]));
+      for (let i = 1; i < Math.min(count, 5); i++) ctx.lineTo(SX(px_[i]), SY(py_[i]));
+      ctx.strokeStyle = R.nappeEdge;
+      ctx.lineWidth = Math.max(1, 1.6 * dpr);
+      ctx.stroke();
+      // foam where it lands
+      const fr = Math.max(0.15, Math.min(2.2, R.toeFoamR * (0.6 + q)));
+      ctx.beginPath();
+      ctx.ellipse(SX(px_[count - 1]), SY(py_[count - 1]),
+        fr * zoom, fr * 0.5 * zoom, 0, 0, TAU);
+      ctx.fillStyle = R.toeFoamColor;
+      ctx.fill();
+    }
+    b = e;
+  }
+}
+
+// ---- leak / breach jets --------------------------------------------------
+
+const gapY0 = new Float64Array(8);
+const gapY1 = new Float64Array(8);
+const jetQ = new Float64Array(8);
+const jetOrder = new Int32Array(8);
+
+// Open y-intervals at a boundary: the complement of water.blocked[b] between
+// the sill and the crest. Mirrors the gap walk in physics/water.js.
+function gapsAt(water, b, upSurf) {
+  const blk = water.blocked[b];
+  const sill = water.bedB[b];
+  const top = Math.min(water.crest[b], upSurf);
+  let cursor = sill;
+  let n = 0;
+  if (blk) {
+    for (let k = 0; k < blk.length && n < gapY0.length; k++) {
+      const y0 = Math.max(blk[k][0], sill);
+      const y1 = Math.max(blk[k][1], sill);
+      if (y1 <= sill) continue;
+      if (y0 > cursor + 1e-3 && cursor < top) {
+        gapY0[n] = cursor; gapY1[n] = Math.min(y0, top); n++;
+      }
+      if (y1 > cursor) cursor = y1;
+    }
+  }
+  if (cursor < top - 1e-3 && n < gapY0.length) { gapY0[n] = cursor; gapY1[n] = top; n++; }
+  return n;
+}
+
+// One set of jets per sealed run — the CONTROLLING boundary (most orifice flow)
+// drawn at the downstream face. A jet per boundary would stack a dozen
+// overlapping arcs through the thickness of the same dam.
+function drawJets(ctx, water, S) {
+  const n = water.n;
+  if (!water.gapFlow || !water.sealed) return;
+
+  let b = 1;
+  while (b < n) {
+    if (!water.sealed[b]) { b++; continue; }
+    let e = b, best = b, bestF = 0;
+    while (e < n && water.sealed[e]) {
+      const f = Math.abs(water.gapFlow[e]);
+      if (f > bestF) { bestF = f; best = e; }
+      e++;
+    }
+    if (bestF > R.jetMinFlow) drawJetsAt(ctx, water, S, best, b, e);
+    b = e;
+  }
+}
+
+function drawJetsAt(ctx, water, S, b, runStart, runEnd) {
+  const flow = water.gapFlow[b];
+  const dir = flow >= 0 ? 1 : -1;
+  const iUp = Math.max(0, Math.min(water.n - 1, dir > 0 ? runStart - 1 : runEnd));
+  const upSurf = water.bed[iUp] + water.depth[iUp];
+  const count = gapsAt(water, b, upSurf);
+  if (!count) return;
+
+  // the jet emerges from the downstream face of the dam, not mid-thickness
+  const xFace = water.x0 + (dir > 0 ? runEnd : runStart) * water.cellW;
+  const total = Math.abs(flow);
+
+  // share the measured flow across the gaps by their own orifice capacity
+  let cap = 0;
+  for (let k = 0; k < count; k++) {
+    const h = Math.max(0, upSurf - (gapY0[k] + gapY1[k]) * 0.5);
+    cap += (gapY1[k] - gapY0[k]) * Math.sqrt(h);
+  }
+  if (!(cap > 0)) return;
+
+  // rank the gaps and keep only the biggest few
+  const order = jetOrder;
+  let m = 0;
+  for (let k = 0; k < count; k++) {
+    const mid = (gapY0[k] + gapY1[k]) * 0.5;
+    const head = Math.max(0, upSurf - mid);
+    if (head <= 0.02) continue;
+    jetQ[k] = total * (((gapY1[k] - gapY0[k]) * Math.sqrt(head)) / cap);
+    order[m++] = k;
+  }
+  for (let a = 1; a < m; a++) {          // insertion sort, m is tiny
+    const v = order[a];
+    let j = a - 1;
+    while (j >= 0 && jetQ[order[j]] < jetQ[v]) { order[j + 1] = order[j]; j--; }
+    order[j + 1] = v;
+  }
+  const draw = Math.min(m, R.jetMaxDraw);
+
+  for (let oi = 0; oi < draw; oi++) {
+    const k = order[oi];
+    const y0 = gapY0[k], y1 = gapY1[k];
+    const mid = (y0 + y1) * 0.5;
+    const head = Math.max(0, upSurf - mid);
+    const q = jetQ[k];
+    if (q < R.jetMinFlow) continue;
+
+    const v0 = Math.sqrt(2 * CONFIG.water.g * head) * R.jetVelCoeff * dir;
+    const thFloor = Math.max(R.jetMinTh, (R.jetMinPx * dpr) / zoom);
+    const th = Math.max(thFloor, Math.min(R.jetMaxTh, q / Math.max(0.5, Math.abs(v0))));
+    const cnt = traceSheet(water, S, xFace, mid, v0, -th, R.jetSteps, R.jetMaxRun);
+    if (cnt < 2) continue;
+
+    fillSheet(ctx, cnt, R.jetColor, R.jetAlphaNear, R.jetAlphaFar);
+
+    // a hard jet gets a bright centreline so "deep leak" reads as violent
+    if (q > R.jetHardFlow) {
+      ctx.beginPath();
+      ctx.moveTo(SX(px_[0]), SY(py_[0]));
+      for (let i = 1; i < cnt; i++) ctx.lineTo(SX(px_[i]), SY(py_[i]));
+      ctx.strokeStyle = R.jetCore;
+      ctx.lineWidth = Math.max(1, th * 0.35 * zoom);
+      ctx.stroke();
+    }
+
+    // splash where it lands
+    const sr = Math.max(0.12, Math.min(2, R.jetSplashR * (0.5 + q)));
+    ctx.beginPath();
+    ctx.ellipse(SX(px_[cnt - 1]), SY(py_[cnt - 1]), sr * zoom, sr * 0.45 * zoom, 0, 0, TAU);
+    ctx.fillStyle = rgba(hexToRgb(R.jetColor), R.jetSplashAlpha);
+    ctx.fill();
+  }
 }
 
 // Clip to everything ABOVE the ground so water can never bleed into the earth.
@@ -244,6 +507,21 @@ function drawSpan(ctx, water, a, b) {
   ctx.fillStyle = grad;
   ctx.fill();
 
+  // Contact shading along the bed: the ground darkens where water sits on it,
+  // which is what stops a filled polygon from looking like flat blue paint.
+  ctx.beginPath();
+  for (let i = a; i < b; i += stride) {
+    const x = water.x0 + (i + 0.5) * cw;
+    const py = SY(bed[i]);
+    const px = SX(x);
+    if (i === a) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.lineTo(SX(water.x0 + (b - 1 + 0.5) * cw), SY(bed[b - 1]));
+  ctx.strokeStyle = R.bedShadow;
+  ctx.lineWidth = Math.max(1, R.bedShadowPx * dpr);
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
   // ---- surface line ----------------------------------------------------
   ctx.beginPath();
   first = true;
@@ -258,10 +536,15 @@ function drawSpan(ctx, water, a, b) {
     const x = water.x0 + (iLast + 0.5) * cw;
     ctx.lineTo(SX(x), SY(surfaceElevation(water, iLast, a, b, x, step, phase, edge)));
   }
+  // sky sheen first: a soft wide band just under the line, then the crisp line
+  ctx.strokeStyle = R.waterSheen;
+  ctx.lineWidth = Math.max(1, R.waterSheenPx * dpr);
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = R.waterSheenAlpha;
+  ctx.stroke();
   ctx.strokeStyle = R.waterSurfaceColor;
   ctx.lineWidth = Math.max(1, R.waterSurfacePx * dpr);
-  ctx.lineCap = 'round';
-  ctx.globalAlpha = 0.85;
+  ctx.globalAlpha = 0.9;
   ctx.stroke();
   ctx.globalAlpha = 1;
 
