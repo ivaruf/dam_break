@@ -177,16 +177,16 @@ export const LEVELS = [
   // x=3-10 in six seconds. Timber bracing splits under that impact.
   // difficulty note: the whole point is the contrast, and it is measured —
   // the same geometry in timber breaks (2 members unbraced, 17 braced) while
-  // the steel version takes 18% load and holds. The delay (30 s against a 35 s
-  // countdown) is deliberate: the pulse must land just AFTER the auto-release,
-  // or the water escapes past a dam site that does not exist yet and retention
-  // is unwinnable. tests/levels-winnable.mjs asserts both sides.
+  // the steel version takes 18% load and holds. In freebuild the flood clock
+  // starts at RELEASE, so the delay is just a short beat before the pulse
+  // drops off the ledge. tests/levels-winnable.mjs asserts both sides.
+  // (Countdown mode is PARKED per user decision — `countdown` kept for when
+  // timed play returns; the old tuning was delay 30 against a 35 s timer.)
   {
     id: 'level-05',
     name: 'The Wave',
-    subtitle: 'A reservoir waits on the ledge above. Build before it falls.',
-    mode: 'countdown',
-    countdown: 35,
+    subtitle: 'A reservoir waits on the ledge above. It falls when you say so.',
+    mode: 'freebuild',
     terrain: [
       [0, 15], [3, 12], [10, 12], [13, 11], [16, 3], [20, 2.8], [26, 2.8],
       [29, 3.2], [32, 3.6], [36, 2.9], [40, 3.8], [43, 2], [52, -0.5], [65, -2.5],
@@ -195,13 +195,16 @@ export const LEVELS = [
     buildZone: { x0: 30, x1: 41 },
     water: {
       initial: [],
-      flood: { x: 5, rate: 20, duration: 6, delay: 30 },
+      // rate 28 (was 20 under countdown): a wave meeting a standing dam piles
+      // up more gently than one that met a wall appearing mid-flow, so the
+      // pulse is fatter to keep the timber-breaks/steel-holds contrast.
+      flood: { x: 5, rate: 28, duration: 6, delay: 2 },
     },
     budget: 7710,
     materials: ['timber', 'steel', 'concrete', 'cable'],
     objective: { type: 'retain', minRetention: 0.8, duration: 45 },
     hints: [
-      'That pond on the ledge is going to fall — have a wall standing before it arrives.',
+      'The moment you release, that pond drops off the ledge — build for the impact, not just the depth.',
       'A sudden impact is not the same as deep water. Steel takes a hit; timber splits.',
     ],
     props: [
@@ -292,15 +295,14 @@ export const LEVELS = [
   // seconds before the flood arrives, so it must be built in one confident
   // pass: timber verticals, steel rungs, steel diagonals. Roughly $3,940.
   // difficulty note: heavy and nearly immediate flood (starts at t=3s) with a
-  // 92% retention target, so there is no time to fix a leaking face. Fable
-  // should confirm ~14 members is placeable in 16 s by a player who already
-  // knows the shape from level 3 and 6.
+  // 85% retention target, so there is no room for a leaking face. (Countdown
+  // PARKED: this was tuned as a 16 s build timer — when timed play returns,
+  // confirm ~14 members is placeable in 16 s by a player who knows the shape.)
   {
     id: 'level-08',
     name: 'Flash Flood',
-    subtitle: "The flood is already moving. There's no time to waste.",
-    mode: 'countdown',
-    countdown: 16,
+    subtitle: 'A violent flood, all at once. Your wall meets it head on.',
+    mode: 'freebuild', // countdown PARKED; was a 16 s timer
     terrain: [
       [0, 12], [6, 10], [12, 7.5], [17, 5.5], [21, 4], [27, 4], [30, 4.3],
       [33, 4.6], [37, 3.9], [41, 4.8], [44, 2.5], [54, 0], [68, -2.5],
@@ -309,14 +311,14 @@ export const LEVELS = [
     buildZone: { x0: 31, x1: 42 },
     water: {
       initial: [],
-      flood: { x: 2, rate: 9.09, duration: 11, delay: 7 },
+      flood: { x: 2, rate: 9.09, duration: 11, delay: 2 },
     },
     budget: 5470,
     materials: ['timber', 'steel', 'concrete', 'cable'],
     objective: { type: 'retain', minRetention: 0.85, duration: 40 },
     hints: [
       'You know this shape by now: pier on the bed, rungs across, brace it.',
-      'Build the face first. Brace it after, if there is an after.',
+      'Build the face watertight, then brace it — this flood punishes every gap.',
     ],
     props: [
       { type: 'pine', x: 3 }, { type: 'pine', x: 9 },
@@ -373,7 +375,7 @@ export const LEVELS = [
   // ~4 m bays, and cable ties from each outer base to the opposite crest so
   // the whole dam cannot rack as one piece. Crest around 12.8 m. Roughly
   // $16,000 against a $22,000 budget.
-  // difficulty note: deepest reservoir in the game plus a countdown. 93%
+  // difficulty note: deepest reservoir in the game. 93%
   // retention means the face has to be genuinely watertight, not merely
   // standing. Fable: this is the level to tune LAST — everything before it
   // teaches one piece of this dam.
@@ -381,8 +383,7 @@ export const LEVELS = [
     id: 'level-10',
     name: 'The Big One',
     subtitle: "Everything you've learned, at full scale.",
-    mode: 'countdown',
-    countdown: 38,
+    mode: 'freebuild', // countdown PARKED; was a 38 s timer
     terrain: [
       [0, 20], [10, 16], [20, 12], [28, 8], [34, 5], [44, 5], [50, 5.5],
       [55, 6.0], [59, 5.2], [63, 6.2], [67, 5.4], [71, 6.4], [75, 3],
@@ -392,7 +393,7 @@ export const LEVELS = [
     buildZone: { x0: 53, x1: 72 },
     water: {
       initial: [],
-      flood: { x: 2, rate: 6.68, duration: 55, delay: 22 },
+      flood: { x: 2, rate: 6.68, duration: 55, delay: 3 },
     },
     budget: 22560,
     materials: ['timber', 'steel', 'concrete', 'cable'],

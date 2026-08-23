@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v1.1.0'; // water realism: nappe sheets, breach jets, readable submerged dam
+const VERSION = 'v1.2.0'; // countdown parked: RELEASE WATER on every level
 const CACHE = `dambuilder-${VERSION}`;
 
 const ASSETS = [
