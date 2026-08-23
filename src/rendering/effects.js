@@ -409,9 +409,10 @@ function countKind(kind) {
 
 function spawnMist(j, dir, strength) {
   const R = CONFIG.render;
-  // The nappe sheet in waterRenderer.js is the overtopping now. Mist is a thin
-  // garnish, and it is HARD CAPPED: unbounded sprite stacking at the dam face
-  // is what turned overtopping into an opaque white blob that hid the dam.
+  // The FLUID is the overtopping now — particles pour over the crest by
+  // themselves. Mist is a thin garnish on top of that, and it is HARD CAPPED:
+  // unbounded sprite stacking at the dam face is what turned overtopping into
+  // an opaque white blob that hid the dam.
   if (countKind(PKIND_MIST) >= R.maxMist) return;
   const p = allocParticle(PKIND_MIST);
   p.x = j.x + (Math.random() - 0.5) * 0.6;
@@ -606,7 +607,18 @@ function drawKind(ctx, kind, camX, camY, zoom, hw, hh, shx, shy, cw, ch, margin,
     ctx.globalAlpha = alpha;
 
     switch (kind) {
-      case PKIND_DROPLET:
+      // A droplet is round. It used to be a fillRect, which was defensible when
+      // the bulk water was a heightfield polygon and nothing else in the frame
+      // was drop-shaped — but the fluid now throws real spray, and a square
+      // sitting next to a round particle blob reads as a rendering bug.
+      case PKIND_DROPLET: {
+        const s = Math.max(0.75, p.size * dpr * 0.6);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(sx, sy, s, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
       case PKIND_DUST: {
         const s = Math.max(1, p.size * dpr);
         ctx.fillStyle = p.color;

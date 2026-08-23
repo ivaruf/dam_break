@@ -1,19 +1,57 @@
-// OPUS C owns. Bulk water surface rendering. Contract §9.
+// OPUS C owns. Bulk water rendering. Contract §9.
 //
-// The water must read as one HEAVY BODY, never as a row of cell rectangles:
-//   1. group the grid into contiguous wet spans;
-//   2. smooth each span's surface (midpoint / [1 2 1] passes over the columns);
-//   3. fill one polygon per span — smoothed surface on top, the BED underneath —
-//      with a vertical depth gradient (shallow = light and translucent, deep =
-//      saturated dark blue), so a 6 m reservoir looks heavier than a puddle;
-//   4. a brighter surface line on top;
-//   5. undulation ONLY where the water is actually moving, phased from
-//      water.time (never Math.random — the sim is deterministic and so is this);
-//   6. foam streaks where |velocity| is high.
+// WATER v2: the water IS the particles (physics/fluid.js), so this pass draws
+// the particles — not the derived column heightfield. The old height columns
+// could only ever describe "how much water is above cell i", which is a lie for
+// everything the PIC/FLIP solver now does: a mid-air wave crest became a solid
+// teal mountain, a falling stream read as a 12 m deep column, and a lone
+// droplet became a 0.4 m wide square of reservoir.
 //
-// Under-terrain never shows water: the whole pass is clipped to the region ABOVE
-// the terrain polyline, and the polygon bottom deliberately overshoots the bed
-// so no seam can open between the water and the ground.
+// TECHNIQUE — 2-D metaballs, three offscreen layers at ~half device resolution:
+//
+//   acc   coverage mask. Every visible particle is one cached radial-gradient
+//         sprite (Blinn kernel) drawn with 'lighter', so overlapping particles
+//         ADD and fuse. The field is then blurred by half a particle spacing
+//         and gained ×4 by 'lighter' self-blits: the blur removes the lattice
+//         ripple, the clamped gain is the threshold that turns a cloud of soft
+//         dots into one body with a defined edge. Interior cells (a dense 3×3
+//         block of the coarse occupancy grid) are filled as merged rectangles
+//         instead of per-particle sprites — same silhouette, a third of the
+//         draws on a full reservoir.
+//
+//   sc    scratch. Depth is measured by MORPHOLOGY, never by a column height:
+//         a stack of downward-shifted copies of the mask (one per depth band)
+//         eroded once horizontally and clipped back to the body. The horizontal
+//         term is what keeps a falling nappe or a jet light and airy while a
+//         reservoir goes dark and saturated — a purely vertical measure paints
+//         a 10 m waterfall as deep water, because it does have water above it.
+//         The same buffer then builds the foam (fast particles at the surface,
+//         clipped to the body) and the free surface band (mask − mask↓s, ∩ the
+//         mask pushed up, so a one-particle trickle gets no waterline).
+//
+//   out   the composite: body colour, then depth tint, then foam, then the
+//         surface band twice — once offset and dim as sky sheen, once in place
+//         and bright as the waterline. Alpha compositing is associative, so
+//         building the whole stack offscreen and blitting ONCE (upscaled,
+//         smoothed) is identical to five separate blits and far cheaper.
+//
+// Every pass is confined to the dirty rectangle — the particle bounding box
+// grown by the kernel, the blur and the largest shift — which is what makes
+// the whole thing cost about a third of the screen instead of all of it.
+//
+// The body's base alpha is deliberately low and the depth bands are what add
+// opacity, so a puddle or a wave tongue shows the bed through it while a deep
+// reservoir reads heavy. Nothing is drawn below ground: the whole pass is
+// clipped to the region above the terrain polyline.
+//
+// RETIRED here: the hand-traced overtopping nappe and the breach jet arcs. Both
+// were ballistic sheets drawn from measured flux because the old heightfield
+// could not show water leaving the dam. The fluid does it now, and the two
+// disagreed with each other on screen.
+//
+// Deterministic: no Math.random anywhere (decorative randomness lives in
+// effects.js). Allocation-free per frame — sprites, buffers and the occupancy
+// grid are all cached and reused.
 
 import { CONFIG } from '../config.js';
 import { renderStressOverlay } from './renderer.js';
@@ -27,6 +65,9 @@ let camX = 0, camY = 0, zoom = 1, shX = 0, shY = 0, dpr = 1;
 const SX = (x) => (x - camX) * zoom + cx + shX;
 const SY = (y) => cy - (y - camY) * zoom + shY;
 
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
 function beginFrame(ctx, cam) {
   W = ctx.canvas.width; H = ctx.canvas.height;
   cx = W * 0.5; cy = H * 0.5;
@@ -37,399 +78,618 @@ function beginFrame(ctx, cam) {
   dpr = d > 0.1 && d < 8 ? d : 1;
 }
 
-// ---- colour ramps (built once; no string building in the hot path) --------
+// ---- offscreen layers ----------------------------------------------------
 
-const RAMP_STEPS = 12;
-let ramps = null;
+let buf = null;              // {w,h,sx,sy,c:{},g:{}}
+let offscreenOk = true;      // false under the Node test stubs (no getContext)
 
-function hexToRgb(hex) {
-  const h = typeof hex === 'string' && hex.charAt(0) === '#' ? hex.slice(1) : hex;
-  if (typeof h !== 'string' || h.length < 6) return { r: 40, g: 120, b: 190 };
-  return {
-    r: parseInt(h.slice(0, 2), 16),
-    g: parseInt(h.slice(2, 4), 16),
-    b: parseInt(h.slice(4, 6), 16),
-  };
+function newCanvas(w, h) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+  let c = null;
+  try { c = document.createElement('canvas'); } catch (e) { return null; }
+  if (!c || typeof c.getContext !== 'function') return null;
+  c.width = w; c.height = h;
+  let g = null;
+  try { g = c.getContext('2d'); } catch (e) { return null; }
+  if (!g || typeof g.drawImage !== 'function' || typeof g.createRadialGradient !== 'function') return null;
+  return { c, g };
 }
 
-function rgba(c, a) {
-  return 'rgba(' + Math.round(c.r) + ',' + Math.round(c.g) + ',' + Math.round(c.b) + ',' +
-    (Math.round(a * 1000) / 1000) + ')';
-}
+const LAYERS = ['acc', 'sc', 'out'];
 
-function mix(a, b, f) {
-  return { r: a.r + (b.r - a.r) * f, g: a.g + (b.g - a.g) * f, b: a.b + (b.b - a.b) * f };
-}
-
-function buildRamps() {
-  if (ramps) return ramps;
-  const sh = hexToRgb(R.waterShallow);
-  const md = hexToRgb(R.waterMid);
-  const dp = hexToRgb(R.waterDeep);
-  const top = new Array(RAMP_STEPS + 1);
-  const mid = new Array(RAMP_STEPS + 1);
-  const bot = new Array(RAMP_STEPS + 1);
-  for (let i = 0; i <= RAMP_STEPS; i++) {
-    const f = i / RAMP_STEPS;                       // 0 = puddle, 1 = deep water
-    const a = R.waterShallowAlpha + (R.waterAlpha - R.waterShallowAlpha) * f;
-    // The very surface stays translucent even in deep water: that is what lets
-    // the bed show through the shallows and the dam show through the reservoir.
-    top[i] = rgba(sh, R.waterShoreAlpha + (R.waterAlpha - R.waterShoreAlpha) * f * 0.35);
-    mid[i] = rgba(mix(sh, md, f), a);
-    bot[i] = rgba(mix(sh, dp, f), a);
+function ensureBuffers() {
+  if (!offscreenOk || !(W > 0) || !(H > 0)) return null;
+  const s = clamp(R.blobBufScale, 0.15, 1);
+  const w = Math.max(8, Math.round(W * s));
+  const h = Math.max(8, Math.round(H * s));
+  if (buf && buf.w === w && buf.h === h) return buf;
+  const made = { w, h, sx: w / W, sy: h / H, c: {}, g: {} };
+  for (let i = 0; i < LAYERS.length; i++) {
+    const o = newCanvas(w, h);
+    if (!o) { offscreenOk = false; buf = null; return null; }
+    made.c[LAYERS[i]] = o.c;
+    made.g[LAYERS[i]] = o.g;
+    o.g.imageSmoothingEnabled = true;
   }
-  ramps = { top, mid, bot };
-  return ramps;
+  buf = made;
+  return buf;
 }
 
-// ---- reusable buffers ----------------------------------------------------
+// ---- cached sprites -----------------------------------------------------
+// Diameters in buffer pixels. All particles share one radius, so the sprite is
+// chosen ONCE per frame, not per particle.
 
-let surf = new Float32Array(0);
-let smooth = new Float32Array(0);
-let wet = new Uint8Array(0);
+const LADDER = [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128];
+let bodySprites = null, foamSprites = null;
 
-function ensure(n) {
-  if (surf.length >= n) return;
-  surf = new Float32Array(n);
-  smooth = new Float32Array(n);
-  wet = new Uint8Array(n);
+function makeSprite(size, stops) {
+  const o = newCanvas(size, size);
+  if (!o) return null;
+  const r = size * 0.5;
+  const grad = o.g.createRadialGradient(r, r, 0, r, r, r);
+  for (let i = 0; i < stops.length; i++) grad.addColorStop(stops[i][0], stops[i][1]);
+  o.g.fillStyle = grad;
+  o.g.fillRect(0, 0, size, size);
+  return o.c;
 }
 
-// ---- deterministic noise ------------------------------------------------
+// The falloff profile IS the metaball kernel: Blinn's (1 − t²)³, sampled as
+// gradient stops. The shape matters more than it looks: what makes the water
+// read as a SURFACE rather than a fog bank is that the clamped gain saturates
+// exactly where this kernel is steepest (t ≈ 0.45), so the alpha ramp from
+// body to air is spatially thin. A kernel with a long flat tail (the obvious
+// first guess) puts that transition out where the falloff is nearly flat, and
+// every blob then wears a wide grey halo — measured: a 15 px fuzzy crust along
+// the whole shoreline.
+const BODY_STOPS = [
+  [0, 'rgba(255,255,255,1)'],
+  [0.2, 'rgba(255,255,255,0.885)'],
+  [0.4, 'rgba(255,255,255,0.593)'],
+  [0.5, 'rgba(255,255,255,0.422)'],
+  [0.6, 'rgba(255,255,255,0.262)'],
+  [0.7, 'rgba(255,255,255,0.133)'],
+  [0.8, 'rgba(255,255,255,0.047)'],
+  [0.9, 'rgba(255,255,255,0.007)'],
+  [1, 'rgba(255,255,255,0)'],
+];
+const FOAM_STOPS = [
+  [0, 'rgba(255,255,255,0.95)'],
+  [0.5, 'rgba(255,255,255,0.42)'],
+  [1, 'rgba(255,255,255,0)'],
+];
 
-function frac(seed) {
-  let h = seed >>> 0;
-  h ^= h >>> 15; h = Math.imul(h, 2246822519);
-  h ^= h >>> 13; h = Math.imul(h, 3266489917);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+function ladderFor(cache, stops, diameter) {
+  if (!cache) return null;
+  let i = 0;
+  while (i < LADDER.length - 1 && LADDER[i] < diameter) i++;
+  let s = cache[i];
+  if (s === undefined) {
+    s = makeSprite(LADDER[i], stops);
+    cache[i] = s;
+  }
+  return s;
 }
 
-const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+function bodySprite(diameter) {
+  if (!bodySprites) bodySprites = new Array(LADDER.length);
+  return ladderFor(bodySprites, BODY_STOPS, diameter);
+}
 
-// 0 at rest, 1 in a torrent — gates the undulation so still water is glassy.
-function motion(v) {
-  const a = Math.abs(v);
-  if (a <= R.waveVelMin) return 0;
-  return clamp01((a - R.waveVelMin) / Math.max(0.001, R.waveVelFull - R.waveVelMin));
+function foamSprite(diameter) {
+  if (!foamSprites) foamSprites = new Array(LADDER.length);
+  return ladderFor(foamSprites, FOAM_STOPS, diameter);
+}
+
+// ---- coarse occupancy grid ----------------------------------------------
+// One pass over the visible particles gives three things at once: the interior
+// cells that can be fused into rectangles, a wetness probe for the structure
+// overlay, and the water/ground contact shading.
+
+let gCell = 1, gX0 = 0, gY0 = 0, gNX = 0, gNY = 0;
+let gCount = null, gInner = null, gCellOf = null;
+let gReady = false;
+let gMinX = 0, gMaxX = 0, gMinY = 0, gMaxY = 0;   // world bbox of visible water
+
+function buildGrid(water, count) {
+  gReady = false;
+  gNX = 0; gNY = 0;
+  if (!count) return;
+  const spacing = particleSpacing(water);
+  // never finer than a few device pixels: at far zoom the cell count, not the
+  // particle count, would be what costs
+  const cell = Math.max(spacing * R.blobRadiusMul, R.blobGridMinPx / Math.max(0.05, zoom));
+  const mx = (cx + Math.abs(shX)) / zoom + cell * 2;
+  const my = (cy + Math.abs(shY)) / zoom + cell * 2;
+  const nx = Math.ceil((2 * mx) / cell), ny = Math.ceil((2 * my) / cell);
+  if (!(nx > 0) || !(ny > 0) || nx * ny > R.blobGridMaxCells) return;
+
+  const n = nx * ny;
+  if (!gCount || gCount.length < n) {
+    gCount = new Int32Array(n);
+    gInner = new Uint8Array(n);
+  } else {
+    gCount.fill(0, 0, n);
+    gInner.fill(0, 0, n);
+  }
+  if (!gCellOf || gCellOf.length < count) gCellOf = new Int32Array(Math.max(count, 4096));
+
+  gCell = cell; gNX = nx; gNY = ny;
+  gX0 = camX - mx; gY0 = camY - my;
+
+  const px = water.ppx, py = water.ppy;
+  const inv = 1 / cell;
+  gMinX = Infinity; gMaxX = -Infinity; gMinY = Infinity; gMaxY = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const ix = ((px[i] - gX0) * inv) | 0;
+    const iy = ((py[i] - gY0) * inv) | 0;
+    if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || px[i] < gX0 || py[i] < gY0) { gCellOf[i] = -1; continue; }
+    const c = iy * nx + ix;
+    gCellOf[i] = c;
+    gCount[c]++;
+    // world bbox of the visible water: everything downstream of here works on
+    // that rectangle instead of the whole canvas, which is most of the win on a
+    // level where the reservoir fills a third of the screen
+    if (px[i] < gMinX) gMinX = px[i];
+    if (px[i] > gMaxX) gMaxX = px[i];
+    if (py[i] < gMinY) gMinY = py[i];
+    if (py[i] > gMaxY) gMaxY = py[i];
+  }
+
+  // A cell is INTERIOR when it and all eight neighbours hold enough particles
+  // to be genuinely full — then its own rectangle is inside the disc union and
+  // its particles add nothing to the silhouette.
+  const full = (cell / spacing) * (cell / spacing);
+  const K = Math.max(R.blobFuseMin, Math.ceil(full * R.blobFuseFrac));
+  if (R.blobFuse) {
+    for (let iy = 1; iy < ny - 1; iy++) {
+      const row = iy * nx;
+      for (let ix = 1; ix < nx - 1; ix++) {
+        const c = row + ix;
+        if (gCount[c] < K) continue;
+        if (gCount[c - 1] < K || gCount[c + 1] < K) continue;
+        const up = c - nx, dn = c + nx;
+        if (gCount[up] < K || gCount[dn] < K) continue;
+        if (gCount[up - 1] < K || gCount[up + 1] < K) continue;
+        if (gCount[dn - 1] < K || gCount[dn + 1] < K) continue;
+        gInner[c] = 1;
+      }
+    }
+  }
+  gReady = true;
+}
+
+// Wetness probe for renderer.renderStressOverlay: "is there water AT this
+// point", straight from the particles. The derived depth column cannot answer
+// this any more — a waterfall plume makes a dry downstream slope report metres
+// of depth.
+function wetAt(x, y) {
+  if (!gReady) return false;
+  const ix = ((x - gX0) / gCell) | 0;
+  const iy = ((y - gY0) / gCell) | 0;
+  if (ix < 0 || ix >= gNX || iy < 0 || iy >= gNY || x < gX0 || y < gY0) return false;
+  return gCount[iy * gNX + ix] > 0;
+}
+
+// Is this cell within one cell of the free surface (nothing, or almost nothing,
+// directly above it)? Used to keep foam on the skin of the water.
+function atSurface(cellId) {
+  const up = cellId + gNX;
+  if (up >= gNX * gNY) return true;
+  return gCount[up] === 0;
+}
+
+function particleSpacing(water) {
+  const f = water.fluid;
+  if (f && f.spacing > 0) return f.spacing;
+  if (water.pradius > 0) return water.pradius / Math.max(0.05, CONFIG.fluid.radiusFrac);
+  return CONFIG.fluid.spacing;
 }
 
 // ---- entry point --------------------------------------------------------
 
+// Per-frame cost readout for the F2 overlay and the headless perf runs. Two
+// timestamps a frame; nothing else in here is allowed to allocate.
+const stat = { ms: 0, particles: 0, sprites: 0, fused: 0, buf: 0, dirty: 0, offscreen: true };
+export function stats() {
+  stat.buf = buf ? buf.w : 0;
+  stat.offscreen = offscreenOk;
+  return stat;
+}
+
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
 export function render(ctx, cam, water, S) {
   if (!water) return;
+  const t0 = nowMs();
   beginFrame(ctx, cam);
 
-  const n = water.n;
-  ensure(n);
-  const minD = (water.cfg && water.cfg.minDepth) || 0.005;
-  const depth = water.depth, bed = water.bed;
-
-  // visible cell range (+2 cells of margin so spans close off-screen)
-  const xLeft = camX - (cx + Math.abs(shX)) / zoom;
-  const xRight = camX + (cx + Math.abs(shX)) / zoom;
-  let i0 = Math.floor((xLeft - water.x0) / water.cellW) - 2;
-  let i1 = Math.ceil((xRight - water.x0) / water.cellW) + 2;
-  if (i0 < 0) i0 = 0;
-  if (i1 > n) i1 = n;
-  if (i1 <= i0) { renderStressOverlay(ctx, cam, S); return; }
-
-  for (let i = i0; i < i1; i++) {
-    wet[i] = depth[i] > minD ? 1 : 0;
-    surf[i] = bed[i] + depth[i];
-    smooth[i] = surf[i];
-  }
-
-  // midpoint smoothing, wet neighbours only: a [1 2 1] kernel per pass
-  for (let pass = 0; pass < R.smoothPasses; pass++) {
-    for (let i = i0; i < i1; i++) {
-      if (!wet[i]) continue;
-      const l = i > i0 && wet[i - 1] ? smooth[i - 1] : smooth[i];
-      const r = i + 1 < i1 && wet[i + 1] ? smooth[i + 1] : smooth[i];
-      surf[i] = (l + 2 * smooth[i] + r) * 0.25;
-    }
-    for (let i = i0; i < i1; i++) if (wet[i]) smooth[i] = surf[i];
-  }
+  const count = water.pcount | 0;
+  stat.particles = count;
+  stat.sprites = 0;
+  stat.fused = 0;
+  buildGrid(water, count);
 
   ctx.save();
   clipAboveTerrain(ctx, S && S.terrain);
-
-  // walk the spans
-  let s = -1;
-  for (let i = i0; i <= i1; i++) {
-    const isWet = i < i1 && wet[i] === 1;
-    if (isWet && s < 0) s = i;
-    else if (!isWet && s >= 0) {
-      if (i - s >= R.minSpanCells) drawSpan(ctx, water, s, i);
-      s = -1;
-    }
+  if (count > 0) {
+    const b = ensureBuffers();
+    if (b) drawBody(ctx, water, count, b);
+    else drawBodyFallback(ctx, water, count);
   }
-
-  // Pouring water is drawn INSIDE the terrain clip (it must not spill into the
-  // ground) but BEFORE the structure overlay, so the dam always ends up on top
-  // of its own waterfall rather than behind a cloud.
-  drawOvertop(ctx, water, S);
-  drawJets(ctx, water, S);
-
+  drawBedContact(ctx, S && S.terrain);
   ctx.restore();
+  stat.ms = nowMs() - t0;
 
-  // failing members must stay readable through the water (see renderer.js)
-  renderStressOverlay(ctx, cam, S);
+  // failing / submerged members must stay readable through the water
+  renderStressOverlay(ctx, cam, S, gReady ? wetAt : null);
 }
 
-// ---- pouring water: shared ballistic sheet -------------------------------
+// ---- the water body -----------------------------------------------------
 
-// Reused point buffers: a sheet is rebuilt every frame, so it must not allocate.
-const MAXPT = 40;
-const px_ = new Float64Array(MAXPT);
-const py_ = new Float64Array(MAXPT);
-const qx_ = new Float64Array(MAXPT);
-const qy_ = new Float64Array(MAXPT);
+function drawBody(ctx, water, count, b) {
+  const bw = b.w, bh = b.h, bsx = b.sx, bsy = b.sy;
+  const gAcc = b.g.acc, gSc = b.g.sc, gOut = b.g.out;
 
-// Where a falling sheet is stopped: the ground, or standing water on it.
-function landingY(water, S, x) {
-  const g = S && S.terrain ? S.terrain.heightAt(x) : -Infinity;
-  const i = Math.floor((x - water.x0) / water.cellW);
-  const w = i >= 0 && i < water.n ? water.bed[i] + water.depth[i] : -Infinity;
-  return Math.max(g, w);
-}
+  const spacing = particleSpacing(water);
+  const rW = spacing * R.blobRadiusMul;                     // kernel radius, metres
+  let rB = rW * zoom * bsx;                                 // ... in buffer px
+  if (rB < R.blobMinBufPx) rB = R.blobMinBufPx;             // far-zoom LOD
+  const dia = rB * 2;
+  const sprite = bodySprite(dia);
+  if (!sprite) { offscreenOk = false; drawBodyFallback(ctx, water, count); return; }
 
-// Traces y = y0 − ½g t², x = x0 + vx t into px_/py_ (upper edge) and qx_/qy_
-// (lower edge, offset by `th` perpendicular to the velocity). Returns the
-// number of samples, or 0 if there is nothing to draw.
-function traceSheet(water, S, x0, y0, vx, th, steps, maxRun) {
-  const g = CONFIG.water.g;
-  const n = Math.min(steps, MAXPT - 1);
-  // how long until it lands, and how far it may run
-  let lowest = y0;
-  for (let k = 0; k <= 6; k++) {
-    const y = landingY(water, S, x0 + (vx >= 0 ? 1 : -1) * (maxRun * k) / 6);
-    if (y < lowest) lowest = y;
+  const bands = R.blobDepthBands, alphas = R.blobDepthAlphas;
+  const blurPx = spacing * R.blobSmooth * zoom * bsx;
+  const rimPx = Math.max(1, R.blobRimShift * zoom * bsy);
+  const sheenPx = R.blobSheenShift * zoom * bsy;
+  const thinPx = R.blobThinTest * zoom * bsx;
+
+  // ---- dirty rectangle -------------------------------------------------
+  // Every offscreen pass below is a full-buffer blend if you let it be one, and
+  // the water usually covers a third of the screen. Confining all of them to
+  // the particle bounding box (grown by the kernel, the blur and the deepest
+  // shift any pass applies) is the single biggest saving in here.
+  let maxShift = rimPx > sheenPx ? rimPx : sheenPx;
+  for (let k = 0; k < bands.length; k++) {
+    const sh = bands[k] * zoom * bsy;
+    if (sh > maxShift) maxShift = sh;
   }
-  const fall = Math.max(0.4, y0 - lowest);
-  const tFall = Math.sqrt((2 * fall) / g) * 1.25;
-  const tRun = Math.abs(vx) > 0.25 ? maxRun / Math.abs(vx) : tFall;
-  const tEnd = Math.min(tFall, tRun);
-  if (!(tEnd > 0)) return 0;
+  if (thinPx > maxShift) maxShift = thinPx;
+  const pad = rB + blurPx * 3 + maxShift + 2;
+  let x0 = Math.floor(SX(gMinX) * bsx - pad);
+  let x1 = Math.ceil(SX(gMaxX) * bsx + pad);
+  let y0 = Math.floor(SY(gMaxY) * bsy - pad);
+  let y1 = Math.ceil(SY(gMinY) * bsy + pad);
+  if (!gReady) { x0 = 0; y0 = 0; x1 = bw; y1 = bh; }
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 > bw) x1 = bw;
+  if (y1 > bh) y1 = bh;
+  const dW = x1 - x0, dH = y1 - y0;
+  if (!(dW > 0) || !(dH > 0)) return;
+  stat.dirty = (dW * dH) / (bw * bh);
 
-  let count = 0;
-  for (let i = 0; i <= n; i++) {
-    const t = (tEnd * i) / n;
-    const x = x0 + vx * t;
-    const y = y0 - 0.5 * g * t * t;
-    // velocity direction, for the perpendicular offset
-    const vy = -g * t;
-    const sp = Math.hypot(vx, vy) || 1;
-    const nx = -vy / sp, ny = vx / sp;
-    px_[count] = x; py_[count] = y;
-    qx_[count] = x + nx * th; qy_[count] = y + ny * th;
-    count++;
-    if (i > 0 && y <= landingY(water, S, x)) break;
-  }
-  return count;
-}
+  // ---- 1. coverage mask ------------------------------------------------
+  gAcc.globalCompositeOperation = 'source-over';
+  gAcc.globalAlpha = 1;
+  gAcc.clearRect(x0, y0, dW, dH);
+  gAcc.globalCompositeOperation = 'lighter';
 
-// Fills the traced sheet with a top→toe alpha ramp. Returns nothing; callers
-// read px_/py_ for the landing point.
-function fillSheet(ctx, count, color, aTop, aToe) {
-  if (count < 2) return;
-  const x0s = SX(px_[0]), y0s = SY(py_[0]);
-  const x1s = SX(px_[count - 1]), y1s = SY(py_[count - 1]);
-  ctx.beginPath();
-  ctx.moveTo(x0s, y0s);
-  for (let i = 1; i < count; i++) ctx.lineTo(SX(px_[i]), SY(py_[i]));
-  for (let i = count - 1; i >= 0; i--) ctx.lineTo(SX(qx_[i]), SY(qy_[i]));
-  ctx.closePath();
-  const grad = ctx.createLinearGradient(x0s, y0s, x1s, y1s);
-  const c = hexToRgb(color);
-  grad.addColorStop(0, rgba(c, aTop));
-  grad.addColorStop(1, rgba(c, aToe));
-  ctx.fillStyle = grad;
-  ctx.fill();
-}
+  if (gReady && R.blobFuse) fuseInterior(gAcc, bsx, bsy, bw, bh);
 
-// ---- overtopping ---------------------------------------------------------
+  const px = water.ppx, py = water.ppy, pvx = water.pvx, pvy = water.pvy;
+  const margin = rB + 2;
+  const foamSpeed = R.blobFoamSpeed;
+  const foamSpan = Math.max(0.01, R.blobFoamFull - foamSpeed);
+  const foamCap = R.blobFoamMax | 0;
+  let foamN = 0;
+  ensureFoamBuf(foamCap);
+  const useGrid = gReady && !!gCellOf;
 
-// One sheet per contiguous overtopping run. Merging matters: a separate sprite
-// or sheet per boundary would stack alpha into the opaque white blob this
-// replaces.
-function drawOvertop(ctx, water, S) {
-  const n = water.n;
-  if (!water.weirFlow) return;
-  const minF = R.nappeMinFlow;
+  gAcc.globalAlpha = R.blobPeak;
+  for (let i = 0; i < count; i++) {
+    const sx = SX(px[i]) * bsx;
+    if (sx < -margin || sx > bw + margin) continue;
+    const sy = SY(py[i]) * bsy;
+    if (sy < -margin || sy > bh + margin) continue;
 
-  let b = 1;
-  while (b < n) {
-    if (Math.abs(water.weirFlow[b]) <= minF) { b++; continue; }
-    // Find the CONTROLLING weir in this run (most flow) and use ITS crest. Using
-    // the run's lowest crest instead put the sheet halfway down the dam, because
-    // a lattice's blockage profile dips wherever a bay has no member in it.
-    let e = b, best = b, bestF = 0, signSum = 0;
-    while (e < n && Math.abs(water.weirFlow[e]) > minF) {
-      const f = water.weirFlow[e];
-      if (Math.abs(f) > bestF) { bestF = Math.abs(f); best = e; }
-      signSum += f;
-      e++;
-    }
-    const dir = signSum >= 0 ? 1 : -1;
-    const crest = water.crest[best];
-    const iUp = Math.max(0, Math.min(n - 1, (dir > 0 ? b - 1 : e)));
-    const upSurf = water.bed[iUp] + water.depth[iUp];
-    const H = Math.max(0, upSurf - crest);
-    if (H <= 0.01) { b = e; continue; }
-    const q = bestF;
-    const xLip = water.x0 + (dir > 0 ? e : b) * water.cellW;
-
-    // Thickness comes from the HEAD, not the flow: the depth of water riding
-    // over a broad crest is ~2/3 H, and that is what gives a pour its bulk.
-    const v0 = Math.min(R.nappeMaxVel, Math.sqrt(2 * CONFIG.water.g * H) * R.nappeVelCoeff) * dir;
-    const thFloor = Math.max(R.nappeMinTh, (R.nappeMinPx * dpr) / zoom);
-    const th = Math.max(thFloor, Math.min(R.nappeMaxTh, 0.6 * H));
-    const count = traceSheet(water, S, xLip, crest, v0, -th, R.nappeSteps, R.nappeMaxRun);
-
-    if (count >= 2) {
-      fillSheet(ctx, count, R.nappeColor, R.nappeAlphaTop, R.nappeAlphaToe);
-      // bright lip riding the crest, so the crest line stays legible
-      ctx.beginPath();
-      ctx.moveTo(SX(px_[0]), SY(py_[0]));
-      for (let i = 1; i < Math.min(count, 5); i++) ctx.lineTo(SX(px_[i]), SY(py_[i]));
-      ctx.strokeStyle = R.nappeEdge;
-      ctx.lineWidth = Math.max(1, 1.6 * dpr);
-      ctx.stroke();
-      // foam where it lands
-      const fr = Math.max(0.15, Math.min(2.2, R.toeFoamR * (0.6 + q)));
-      ctx.beginPath();
-      ctx.ellipse(SX(px_[count - 1]), SY(py_[count - 1]),
-        fr * zoom, fr * 0.5 * zoom, 0, 0, TAU);
-      ctx.fillStyle = R.toeFoamColor;
-      ctx.fill();
-    }
-    b = e;
-  }
-}
-
-// ---- leak / breach jets --------------------------------------------------
-
-const gapY0 = new Float64Array(8);
-const gapY1 = new Float64Array(8);
-const jetQ = new Float64Array(8);
-const jetOrder = new Int32Array(8);
-
-// Open y-intervals at a boundary: the complement of water.blocked[b] between
-// the sill and the crest. Mirrors the gap walk in physics/water.js.
-function gapsAt(water, b, upSurf) {
-  const blk = water.blocked[b];
-  const sill = water.bedB[b];
-  const top = Math.min(water.crest[b], upSurf);
-  let cursor = sill;
-  let n = 0;
-  if (blk) {
-    for (let k = 0; k < blk.length && n < gapY0.length; k++) {
-      const y0 = Math.max(blk[k][0], sill);
-      const y1 = Math.max(blk[k][1], sill);
-      if (y1 <= sill) continue;
-      if (y0 > cursor + 1e-3 && cursor < top) {
-        gapY0[n] = cursor; gapY1[n] = Math.min(y0, top); n++;
+    // Only trust the occupancy grid when THIS frame built one: it is skipped
+    // when the view is so wide that the cell count would blow its budget, and
+    // last frame's cell indices would then punch holes in the mask.
+    const cellId = useGrid ? gCellOf[i] : -1;
+    // Foam comes FROM the fluid: a fast particle that is also within a cell of
+    // the free surface. The surface test is the whole trick — gate on speed
+    // alone and an entire 6 m/s wave foams from crest to bed, which is how you
+    // get a cauliflower instead of water. The occupancy grid already knows what
+    // is above each particle, so it costs one array read.
+    if (foamN < foamCap) {
+      const vx = pvx[i], vy = pvy[i];
+      const sp2 = vx * vx + vy * vy;
+      if (sp2 > foamSpeed * foamSpeed && cellId >= 0 && atSurface(cellId)) {
+        foamX[foamN] = sx; foamY[foamN] = sy;
+        foamW[foamN] = clamp01((Math.sqrt(sp2) - foamSpeed) / foamSpan);
+        foamN++;
       }
-      if (y1 > cursor) cursor = y1;
-    }
-  }
-  if (cursor < top - 1e-3 && n < gapY0.length) { gapY0[n] = cursor; gapY1[n] = top; n++; }
-  return n;
-}
-
-// One set of jets per sealed run — the CONTROLLING boundary (most orifice flow)
-// drawn at the downstream face. A jet per boundary would stack a dozen
-// overlapping arcs through the thickness of the same dam.
-function drawJets(ctx, water, S) {
-  const n = water.n;
-  if (!water.gapFlow || !water.sealed) return;
-
-  let b = 1;
-  while (b < n) {
-    if (!water.sealed[b]) { b++; continue; }
-    let e = b, best = b, bestF = 0;
-    while (e < n && water.sealed[e]) {
-      const f = Math.abs(water.gapFlow[e]);
-      if (f > bestF) { bestF = f; best = e; }
-      e++;
-    }
-    if (bestF > R.jetMinFlow) drawJetsAt(ctx, water, S, best, b, e);
-    b = e;
-  }
-}
-
-function drawJetsAt(ctx, water, S, b, runStart, runEnd) {
-  const flow = water.gapFlow[b];
-  const dir = flow >= 0 ? 1 : -1;
-  const iUp = Math.max(0, Math.min(water.n - 1, dir > 0 ? runStart - 1 : runEnd));
-  const upSurf = water.bed[iUp] + water.depth[iUp];
-  const count = gapsAt(water, b, upSurf);
-  if (!count) return;
-
-  // the jet emerges from the downstream face of the dam, not mid-thickness
-  const xFace = water.x0 + (dir > 0 ? runEnd : runStart) * water.cellW;
-  const total = Math.abs(flow);
-
-  // share the measured flow across the gaps by their own orifice capacity
-  let cap = 0;
-  for (let k = 0; k < count; k++) {
-    const h = Math.max(0, upSurf - (gapY0[k] + gapY1[k]) * 0.5);
-    cap += (gapY1[k] - gapY0[k]) * Math.sqrt(h);
-  }
-  if (!(cap > 0)) return;
-
-  // rank the gaps and keep only the biggest few
-  const order = jetOrder;
-  let m = 0;
-  for (let k = 0; k < count; k++) {
-    const mid = (gapY0[k] + gapY1[k]) * 0.5;
-    const head = Math.max(0, upSurf - mid);
-    if (head <= 0.02) continue;
-    jetQ[k] = total * (((gapY1[k] - gapY0[k]) * Math.sqrt(head)) / cap);
-    order[m++] = k;
-  }
-  for (let a = 1; a < m; a++) {          // insertion sort, m is tiny
-    const v = order[a];
-    let j = a - 1;
-    while (j >= 0 && jetQ[order[j]] < jetQ[v]) { order[j + 1] = order[j]; j--; }
-    order[j + 1] = v;
-  }
-  const draw = Math.min(m, R.jetMaxDraw);
-
-  for (let oi = 0; oi < draw; oi++) {
-    const k = order[oi];
-    const y0 = gapY0[k], y1 = gapY1[k];
-    const mid = (y0 + y1) * 0.5;
-    const head = Math.max(0, upSurf - mid);
-    const q = jetQ[k];
-    if (q < R.jetMinFlow) continue;
-
-    const v0 = Math.sqrt(2 * CONFIG.water.g * head) * R.jetVelCoeff * dir;
-    const thFloor = Math.max(R.jetMinTh, (R.jetMinPx * dpr) / zoom);
-    const th = Math.max(thFloor, Math.min(R.jetMaxTh, q / Math.max(0.5, Math.abs(v0))));
-    const cnt = traceSheet(water, S, xFace, mid, v0, -th, R.jetSteps, R.jetMaxRun);
-    if (cnt < 2) continue;
-
-    fillSheet(ctx, cnt, R.jetColor, R.jetAlphaNear, R.jetAlphaFar);
-
-    // a hard jet gets a bright centreline so "deep leak" reads as violent
-    if (q > R.jetHardFlow) {
-      ctx.beginPath();
-      ctx.moveTo(SX(px_[0]), SY(py_[0]));
-      for (let i = 1; i < cnt; i++) ctx.lineTo(SX(px_[i]), SY(py_[i]));
-      ctx.strokeStyle = R.jetCore;
-      ctx.lineWidth = Math.max(1, th * 0.35 * zoom);
-      ctx.stroke();
     }
 
-    // splash where it lands
-    const sr = Math.max(0.12, Math.min(2, R.jetSplashR * (0.5 + q)));
-    ctx.beginPath();
-    ctx.ellipse(SX(px_[cnt - 1]), SY(py_[cnt - 1]), sr * zoom, sr * 0.45 * zoom, 0, 0, TAU);
-    ctx.fillStyle = rgba(hexToRgb(R.jetColor), R.jetSplashAlpha);
-    ctx.fill();
+    if (cellId >= 0 && gInner[cellId]) continue;  // interior: the rects have it
+    gAcc.drawImage(sprite, sx - rB, sy - rB, dia, dia);
+    stat.sprites++;
   }
+  gAcc.globalAlpha = 1;
+  gAcc.globalCompositeOperation = 'source-over';
+
+  // Smooth, THEN gain. The particles sit on a ~0.3 m lattice, so the raw
+  // isosurface wears a per-particle ripple that reads as a lumpy crust along
+  // the whole shoreline. A blur of about half a particle spacing averages that
+  // ripple away; the 'lighter' self-blit afterwards clamps the softened field
+  // back into a crisp edge. Blur first and gain second — the other order just
+  // fattens the body.
+  smoothMask(b, x0, y0, dW, dH, blurPx);
+
+  // From here on every layer is clipped to the dirty rectangle, so the
+  // whole-canvas composite operations ('copy', 'source-in', 'destination-in')
+  // cost the rectangle and not the buffer.
+  clipRect(gAcc, x0, y0, dW, dH);
+  clipRect(gSc, x0, y0, dW, dH);
+  clipRect(gOut, x0, y0, dW, dH);
+
+  gAcc.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < R.blobGainPasses; k++) {
+    gAcc.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0, dW, dH);
+  }
+  gAcc.globalCompositeOperation = 'source-over';
+
+  // ---- 2. body colour into `out` --------------------------------------
+  gOut.globalCompositeOperation = 'source-over';
+  gOut.globalAlpha = clamp01(R.blobBodyAlpha);
+  gOut.clearRect(x0, y0, dW, dH);
+  gOut.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0, dW, dH);
+  gOut.globalAlpha = 1;
+  gOut.globalCompositeOperation = 'source-in';
+  gOut.fillStyle = R.blobBodyColor;
+  gOut.fillRect(x0, y0, dW, dH);
+  gOut.globalCompositeOperation = 'source-over';
+
+  // ---- 3. depth tint ---------------------------------------------------
+  // A stack of downward-shifted copies of the mask: a pixel with water 0.15 m
+  // above it takes one layer of tint, one with water 3.5 m above it takes all
+  // four. Then ONE horizontal erosion for the whole stack — "is this body wider
+  // than a stream" — before it is clipped back to the body and colourised.
+  // Per-band erosion looked marginally better and cost three times the blits.
+  let bandN = 0;
+  for (let k = 0; k < bands.length; k++) {
+    const dy = bands[k] * zoom * bsy;
+    if (!(dy >= 0.5)) continue;
+    gSc.globalAlpha = clamp01(alphas[k] === undefined ? 0.3 : alphas[k]);
+    gSc.globalCompositeOperation = bandN === 0 ? 'copy' : 'source-over';
+    gSc.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0 + dy, dW, dH);
+    bandN++;
+  }
+  if (bandN > 0) {
+    gSc.globalAlpha = 1;
+    gSc.globalCompositeOperation = 'destination-in';
+    if (thinPx >= 0.5) {
+      gSc.drawImage(b.c.acc, x0, y0, dW, dH, x0 + thinPx, y0, dW, dH);
+      gSc.drawImage(b.c.acc, x0, y0, dW, dH, x0 - thinPx, y0, dW, dH);
+    }
+    gSc.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0, dW, dH);
+    gSc.globalCompositeOperation = 'source-in';
+    gSc.fillStyle = R.blobDeepColor;
+    gSc.fillRect(x0, y0, dW, dH);
+    gSc.globalCompositeOperation = 'source-over';
+    gOut.drawImage(b.c.sc, x0, y0, dW, dH, x0, y0, dW, dH);
+  }
+
+  // ---- 4. foam, sitting ON the body ----------------------------------
+  if (foamN > 0) {
+    let fr = spacing * R.blobFoamR * zoom * bsx;
+    if (fr < 1) fr = 1;
+    const fsp = foamSprite(fr * 2);
+    if (fsp) {
+      gSc.globalCompositeOperation = 'source-over';
+      gSc.globalAlpha = 1;
+      gSc.clearRect(x0, y0, dW, dH);
+      gSc.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < foamN; i++) {
+        gSc.globalAlpha = R.blobFoamSprite * (0.35 + 0.65 * foamW[i]);
+        const s = fr * (0.75 + 0.55 * foamW[i]);
+        gSc.drawImage(fsp, foamX[i] - s, foamY[i] - s, s * 2, s * 2);
+      }
+      gSc.globalAlpha = 1;
+      gSc.globalCompositeOperation = 'destination-in';
+      gSc.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0, dW, dH);
+      gSc.globalCompositeOperation = 'source-in';
+      gSc.fillStyle = R.blobFoamColor;
+      gSc.fillRect(x0, y0, dW, dH);
+      gSc.globalCompositeOperation = 'source-over';
+      gOut.globalAlpha = clamp01(R.blobFoamAlpha);
+      gOut.drawImage(b.c.sc, x0, y0, dW, dH, x0, y0, dW, dH);
+      gOut.globalAlpha = 1;
+    }
+  }
+
+  // ---- 5. free surface -------------------------------------------------
+  // mask − mask↓rim = the top rim of every blob. Blitted twice: once in place
+  // as the crisp waterline, once pushed down a little at low alpha as the sky
+  // sheen sitting just under it (a second, wider band would cost four more
+  // buffer passes for the same read).
+  surfaceBand(gSc, b, rimPx, R.blobRimMinThick * zoom * bsy, R.blobRimColor, x0, y0, dW, dH);
+  gOut.globalAlpha = clamp01(R.blobSheenAlpha);
+  gOut.drawImage(b.c.sc, x0, y0, dW, dH, x0, y0 + sheenPx, dW, dH);
+  gOut.globalAlpha = clamp01(R.blobRimAlpha);
+  gOut.drawImage(b.c.sc, x0, y0, dW, dH, x0, y0, dW, dH);
+  gOut.globalAlpha = 1;
+
+  unclip(gAcc); unclip(gSc); unclip(gOut);
+
+  // ---- 6. one upscaled blit -------------------------------------------
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(b.c.out, x0, y0, dW, dH, x0 / bsx, y0 / bsy, dW / bsx, dH / bsy);
 }
+
+function clipRect(g, x, y, w, h) {
+  g.save();
+  g.beginPath();
+  g.rect(x, y, w, h);
+  g.clip();
+}
+
+function unclip(g) {
+  g.restore();
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+}
+
+// Blur the coverage mask in place (via the scratch layer). Uses the 2-D context
+// filter where it exists, and falls back to a bilinear down/up bounce, which is
+// a serviceable box blur and needs no feature at all.
+function smoothMask(b, x0, y0, dW, dH, radiusPx) {
+  if (!(radiusPx > 0.4)) return;
+  const gAcc = b.g.acc, gSc = b.g.sc;
+  gSc.globalAlpha = 1;
+  gAcc.globalAlpha = 1;
+  if (typeof gAcc.filter === 'string') {
+    gSc.globalCompositeOperation = 'copy';
+    gSc.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0, dW, dH);
+    gAcc.globalCompositeOperation = 'copy';
+    gAcc.filter = 'blur(' + (Math.round(radiusPx * 100) / 100) + 'px)';
+    gAcc.drawImage(b.c.sc, x0, y0, dW, dH, x0, y0, dW, dH);
+    gAcc.filter = 'none';
+  } else {
+    const div = 1 + radiusPx;
+    const sw = Math.max(2, Math.round(dW / div));
+    const sh = Math.max(2, Math.round(dH / div));
+    gSc.globalCompositeOperation = 'copy';
+    gSc.drawImage(b.c.acc, x0, y0, dW, dH, 0, 0, sw, sh);
+    gAcc.globalCompositeOperation = 'copy';
+    gAcc.drawImage(b.c.sc, 0, 0, sw, sh, x0, y0, dW, dH);
+  }
+  gAcc.globalCompositeOperation = 'source-over';
+  gSc.globalCompositeOperation = 'source-over';
+}
+
+// mask − mask↓shift = the top rim of every blob = the free surface, then
+// ∩ mask↑thick = "and there is real water under it". That second term is what
+// stops a one-particle-thick sheet running down a slope from being drawn as a
+// bright white line: a 0.2 m trickle would otherwise be nothing BUT waterline,
+// and the shallows read as frost instead of water.
+function surfaceBand(g, b, shift, thick, color, x0, y0, dW, dH) {
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'copy';
+  g.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0, dW, dH);
+  g.globalCompositeOperation = 'destination-out';
+  g.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0 + Math.max(0.75, shift), dW, dH);
+  if (thick >= 0.5) {
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(b.c.acc, x0, y0, dW, dH, x0, y0 - thick, dW, dH);
+  }
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = color;
+  g.fillRect(x0, y0, dW, dH);
+  g.globalCompositeOperation = 'source-over';
+}
+
+// Interior cells as merged horizontal runs: identical silhouette, one rect per
+// run instead of a sprite per particle. This is what keeps an 8000-particle
+// reservoir at a couple of thousand draw calls.
+function fuseInterior(g, bsx, bsy, bw, bh) {
+  const cell = gCell;
+  g.globalAlpha = 1;
+  g.fillStyle = '#ffffff';
+  g.beginPath();
+  let any = false;
+  for (let iy = 0; iy < gNY; iy++) {
+    const row = iy * gNX;
+    let ix = 0;
+    while (ix < gNX) {
+      if (!gInner[row + ix]) { ix++; continue; }
+      let end = ix;
+      while (end + 1 < gNX && gInner[row + end + 1]) end++;
+      const wx0 = gX0 + ix * cell, wx1 = gX0 + (end + 1) * cell;
+      const wy0 = gY0 + iy * cell, wy1 = gY0 + (iy + 1) * cell;
+      const x0 = SX(wx0) * bsx, x1 = SX(wx1) * bsx;
+      const y1 = SY(wy0) * bsy, y0 = SY(wy1) * bsy;       // y flips
+      if (x1 > -2 && x0 < bw + 2 && y1 > -2 && y0 < bh + 2) {
+        g.rect(x0, y0, x1 - x0, y1 - y0);
+        stat.fused++;
+        any = true;
+      }
+      ix = end + 1;
+    }
+  }
+  if (any) g.fill();
+}
+
+// ---- foam scratch (no per-frame allocation) -----------------------------
+
+let foamX = new Float32Array(0), foamY = new Float32Array(0), foamW = new Float32Array(0);
+
+function ensureFoamBuf(n) {
+  if (foamX.length >= n) return;
+  foamX = new Float32Array(n);
+  foamY = new Float32Array(n);
+  foamW = new Float32Array(n);
+}
+
+// ---- fallback (no offscreen canvas: Node test stubs) --------------------
+
+function drawBodyFallback(ctx, water, count) {
+  const spacing = particleSpacing(water);
+  const r = Math.max(1, spacing * R.blobRadiusMul * zoom * 0.85);
+  const px = water.ppx, py = water.ppy;
+  ctx.globalAlpha = clamp01(R.blobBodyAlpha);
+  ctx.fillStyle = R.blobBodyColor;
+  ctx.beginPath();
+  let any = false;
+  for (let i = 0; i < count; i++) {
+    const sx = SX(px[i]);
+    if (sx < -r || sx > W + r) continue;
+    const sy = SY(py[i]);
+    if (sy < -r || sy > H + r) continue;
+    ctx.moveTo(sx + r, sy);
+    ctx.arc(sx, sy, r, 0, TAU);
+    any = true;
+  }
+  if (any) ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+// ---- water/ground contact ----------------------------------------------
+// A soft dark band exactly where water sits on the ground. Without it a
+// translucent body floats; with it the shoreline reads as contact. Driven by
+// the occupancy grid, so a waterfall passing over dry ground never paints one.
+
+function drawBedContact(ctx, terrain) {
+  if (!gReady || !terrain || !gNX) return;
+  const cell = gCell;
+  const yTop = gY0 + gNY * cell;
+  ctx.beginPath();
+  let run = false, any = false;
+  for (let ix = 0; ix < gNX; ix++) {
+    const x = gX0 + (ix + 0.5) * cell;
+    const gy = terrain.heightAt(x);
+    let wet = false;
+    if (gy > gY0 && gy < yTop) {
+      const iy = ((gy - gY0) / cell) | 0;
+      const c = iy * gNX + ix;
+      wet = gCount[c] > 0 || (iy + 1 < gNY && gCount[c + gNX] > 0);
+    }
+    if (!wet) { run = false; continue; }
+    const sx = SX(x), sy = SY(gy);
+    if (sx < -20 || sx > W + 20) { run = false; continue; }
+    if (!run) { ctx.moveTo(sx, sy); run = true; } else ctx.lineTo(sx, sy);
+    any = true;
+  }
+  if (!any) return;
+  ctx.strokeStyle = R.bedShadow;
+  ctx.lineWidth = Math.max(1, R.bedShadowPx * dpr);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+// ---- terrain clip ------------------------------------------------------
 
 // Clip to everything ABOVE the ground so water can never bleed into the earth.
 function clipAboveTerrain(ctx, terrain) {
@@ -444,149 +704,4 @@ function clipAboveTerrain(ctx, terrain) {
   ctx.lineTo(SX(last[0]) + W, -H);
   ctx.closePath();
   ctx.clip();
-}
-
-// One contiguous wet run, cells [a, b).
-function drawSpan(ctx, water, a, b) {
-  const cw = water.cellW;
-  const depth = water.depth, bed = water.bed, vel = water.vel;
-  const time = water.time || 0;
-
-  // sample stride: never finer than a couple of device pixels
-  const pxPerCell = cw * zoom;
-  const stride = Math.max(1, Math.floor((R.waterSamplePx * dpr) / Math.max(0.001, pxPerCell)));
-
-  let maxDepth = 0;
-  let topY = Infinity, botY = -Infinity;
-  for (let i = a; i < b; i++) {
-    if (depth[i] > maxDepth) maxDepth = depth[i];
-    if (smooth[i] > botY) botY = smooth[i];
-    if (bed[i] < topY) topY = bed[i];
-  }
-  const surfaceTop = botY;                      // highest surface elevation
-  const bedBottom = topY - R.waterBedOvershoot; // lowest bed, pushed under
-
-  const sTop = SY(surfaceTop);
-  const sBot = SY(bedBottom);
-  if (sBot < -H || sTop > H * 2) return;
-
-  const step = R.waveLen > 0 ? TAU / R.waveLen : 0;
-  const phase = -time * R.waveSpeed * step;
-  const edge = Math.max(1, Math.min(4, Math.floor((b - a) * 0.25)));
-
-  // ---- body ------------------------------------------------------------
-  ctx.beginPath();
-  let first = true;
-  for (let i = a; i < b; i += stride) {
-    const x = water.x0 + (i + 0.5) * cw;
-    const y = surfaceElevation(water, i, a, b, x, step, phase, edge);
-    const px = SX(x), py = SY(y);
-    if (first) { ctx.moveTo(px, py); first = false; } else { ctx.lineTo(px, py); }
-  }
-  // always finish exactly on the last cell so the span closes on the bank
-  {
-    const iLast = b - 1;
-    const x = water.x0 + (iLast + 0.5) * cw;
-    const y = surfaceElevation(water, iLast, a, b, x, step, phase, edge);
-    ctx.lineTo(SX(x), SY(y));
-  }
-  // right wall down to the bed, then back along the bed
-  ctx.lineTo(SX(water.x0 + b * cw), SY(bed[b - 1] - R.waterBedOvershoot));
-  for (let i = b - 1; i >= a; i -= stride) {
-    ctx.lineTo(SX(water.x0 + (i + 0.5) * cw), SY(bed[i] - R.waterBedOvershoot));
-  }
-  ctx.lineTo(SX(water.x0 + a * cw), SY(bed[a] - R.waterBedOvershoot));
-  ctx.closePath();
-
-  const rp = buildRamps();
-  const dStep = Math.round(clamp01(maxDepth / Math.max(0.001, R.waterDeepRef)) * RAMP_STEPS);
-  const grad = ctx.createLinearGradient(0, sTop, 0, sBot);
-  grad.addColorStop(0, rp.top[dStep]);
-  grad.addColorStop(0.4, rp.mid[dStep]);
-  grad.addColorStop(1, rp.bot[dStep]);
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  // Contact shading along the bed: the ground darkens where water sits on it,
-  // which is what stops a filled polygon from looking like flat blue paint.
-  ctx.beginPath();
-  for (let i = a; i < b; i += stride) {
-    const x = water.x0 + (i + 0.5) * cw;
-    const py = SY(bed[i]);
-    const px = SX(x);
-    if (i === a) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  }
-  ctx.lineTo(SX(water.x0 + (b - 1 + 0.5) * cw), SY(bed[b - 1]));
-  ctx.strokeStyle = R.bedShadow;
-  ctx.lineWidth = Math.max(1, R.bedShadowPx * dpr);
-  ctx.lineCap = 'round';
-  ctx.stroke();
-
-  // ---- surface line ----------------------------------------------------
-  ctx.beginPath();
-  first = true;
-  for (let i = a; i < b; i += stride) {
-    const x = water.x0 + (i + 0.5) * cw;
-    const y = surfaceElevation(water, i, a, b, x, step, phase, edge);
-    const px = SX(x), py = SY(y);
-    if (first) { ctx.moveTo(px, py); first = false; } else { ctx.lineTo(px, py); }
-  }
-  {
-    const iLast = b - 1;
-    const x = water.x0 + (iLast + 0.5) * cw;
-    ctx.lineTo(SX(x), SY(surfaceElevation(water, iLast, a, b, x, step, phase, edge)));
-  }
-  // sky sheen first: a soft wide band just under the line, then the crisp line
-  ctx.strokeStyle = R.waterSheen;
-  ctx.lineWidth = Math.max(1, R.waterSheenPx * dpr);
-  ctx.lineCap = 'round';
-  ctx.globalAlpha = R.waterSheenAlpha;
-  ctx.stroke();
-  ctx.strokeStyle = R.waterSurfaceColor;
-  ctx.lineWidth = Math.max(1, R.waterSurfacePx * dpr);
-  ctx.globalAlpha = 0.9;
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-
-  drawFoam(ctx, water, a, b, step, phase, edge, stride);
-}
-
-// Smoothed surface + deterministic undulation, tapered to zero at the banks so
-// the water always meets the ground cleanly.
-function surfaceElevation(water, i, a, b, x, step, phase, edge) {
-  const m = motion((water.vel[i] + water.vel[i + 1]) * 0.5);
-  if (m <= 0) return smooth[i];
-  const dEdge = Math.min(i - a, b - 1 - i);
-  const taper = dEdge >= edge ? 1 : dEdge / edge;
-  const amp = R.waveAmp * m * taper *
-    Math.min(1, water.depth[i] / Math.max(0.001, R.waveDepthRef));
-  return smooth[i] + Math.sin(x * step + phase) * amp;
-}
-
-// Short bright streaks riding the fast water. Positions are hashed from the cell
-// index and a slow time bucket, so they drift without any randomness.
-function drawFoam(ctx, water, a, b, step, phase, edge, stride) {
-  const cw = water.cellW;
-  const bucket = Math.floor((water.time || 0) * R.foamDriftHz);
-  const len = Math.max(4 * dpr, 0.6 * zoom);
-  let any = false;
-  ctx.beginPath();
-  for (let i = a; i < b; i += stride) {
-    const v = (water.vel[i] + water.vel[i + 1]) * 0.5;
-    if (Math.abs(v) < R.foamVelMin) continue;
-    if (frac(i * 2654435761 + bucket) > R.foamChance) continue;
-    const x = water.x0 + (i + 0.5) * cw;
-    const y = surfaceElevation(water, i, a, b, x, step, phase, edge);
-    const px = SX(x), py = SY(y);
-    if (px < 0 || px > W) continue;
-    const l = len * (0.5 + Math.min(1, Math.abs(v) / R.waveVelFull));
-    const dir = v >= 0 ? 1 : -1;
-    ctx.moveTo(px, py + R.foamPx * dpr);
-    ctx.lineTo(px + l * dir, py + R.foamPx * dpr * 1.6);
-    any = true;
-  }
-  if (!any) return;
-  ctx.strokeStyle = R.foamColor;
-  ctx.lineWidth = Math.max(1, R.foamPx * dpr);
-  ctx.stroke();
 }

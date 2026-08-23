@@ -318,10 +318,13 @@ game.setSpeed(v) · game.loadTestScene(i)  // physics test scenes 1–8
 
 ```js
 renderer.render(ctx, camera, scene)        // terrain, anchors, buildZone, structure
-renderer.renderStressOverlay(ctx, camera, scene)
+renderer.renderStressOverlay(ctx, camera, scene, wetTest?)
    // documented exception to "renderer draws before waterRenderer":
    // waterRenderer calls this at the end of its own pass so overloaded
-   // members stay readable under deep water
+   // members stay readable under deep water. wetTest(x,y) is an optional
+   // particle-true wetness probe waterRenderer supplies (column fallback
+   // otherwise). waterRenderer also exports stats() — per-frame ms /
+   // particles / sprites / dirty ratio for the F2 overlay and perf runs.
                                            // members colored by load (tension cool,
                                            // compression warm, flashing >0.8, thickness
                                            // + slight deform near failure), design ghosts

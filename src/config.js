@@ -355,6 +355,66 @@ export const CONFIG = {
     waterSheenPx: 3.5,                  // device px of sheen band under the line
     waterShoreAlpha: 0.30,              // alpha at the very surface (shallows show the bed)
 
+    // ---- WATER v2: PARTICLE METABALL BODY (rendering/waterRenderer.js) ----
+    // The bulk water is drawn FROM THE PARTICLES: cached radial sprites
+    // accumulated with 'lighter' into a reduced-resolution offscreen buffer,
+    // gained/clamped into one body with a defined edge, then depth-tinted by
+    // morphological erosion of that mask. Nothing here reads water.depth: a
+    // waterfall plume pollutes the derived columns, and the particles do not lie.
+    blobBufScale: 0.5,         // offscreen buffer resolution vs device pixels.
+                               // Half is the sweet spot: at 1/3 the waterline
+                               // upscales into a 6 px smear, at 1 the blend cost
+                               // triples for detail nobody sees through water.
+    blobRadiusMul: 2.0,        // metaball kernel radius / particle spacing. Below
+                               // ~1.5 the lattice does not fuse and a calm
+                               // reservoir shows dots; above ~2 thin streams fatten.
+    blobMinBufPx: 1.7,         // kernel radius floor in BUFFER px (far-zoom LOD:
+                               // the body stays a body instead of dissolving)
+    blobPeak: 1.0,             // per-particle sprite alpha before the gain
+    blobGainPasses: 2,         // 'lighter' self-blits; silhouette gain = 2^n. With
+                               // blobPeak this is the soft threshold that fuses
+                               // the blobs into one body with a defined edge.
+    blobSmooth: 0.75,          // mask blur radius in particle spacings, applied
+                               // BEFORE the gain: kills the per-particle lattice
+                               // ripple that otherwise reads as a lumpy crust.
+    blobBodyAlpha: 0.58,       // base body opacity — LOW on purpose, so a puddle
+                               // or a wave tongue shows the bed through it
+    blobBodyColor: '#3a97d2',
+    blobDeepColor: '#08375f',
+    blobDepthBands: [0.15, 0.6, 1.6, 3.5],  // m below the free surface
+    blobDepthAlphas: [0.30, 0.30, 0.32, 0.34],
+    blobThinTest: 0.5,         // m of horizontal erosion applied to the whole
+                               // depth stack: water narrower than ~2× this is a
+                               // stream, not a body, so it keeps its light colour.
+                               // Without it a 10 m waterfall renders as deep
+                               // reservoir, because it does have water above it.
+    blobRimShift: 0.10,        // m: mask − mask↓ = crisp surface line
+    blobRimColor: '#cdeeff',
+    blobRimMinThick: 0.3,      // m of water that must sit UNDER a stretch of
+                               // surface before it earns a waterline highlight
+    blobRimAlpha: 0.5,
+    blobSheenShift: 0.30,      // m: the wider soft sky-sheen band under the line
+    blobSheenColor: '#8fcdf2',
+    blobSheenAlpha: 0.13,
+    blobFuse: true,            // fuse interior grid cells into rects (perf)
+    blobFuseMin: 3,            // min particles/cell before a cell can be interior
+    blobFuseFrac: 0.55,        // ... or this fraction of a full cell, whichever is
+                               // larger (the cell grows when zoomed out)
+    blobGridMinPx: 5,          // device-px floor on the occupancy cell size
+    blobGridMaxCells: 90000,   // safety valve on the occupancy grid
+    blobFoamSpeed: 4.2,        // m/s where a particle starts carrying foam
+    blobFoamFull: 9,           // m/s for full foam weight
+    blobFoamMax: 900,          // hard cap on foam sprites per frame
+    blobFoamR: 0.75,           // foam sprite radius in units of particle spacing
+    blobFoamSprite: 0.3,       // per-sprite alpha (they stack: keep it low)
+    blobFoamAlpha: 0.55,       // whole-layer alpha cap — foam can never go opaque
+    blobFoamColor: '#eaf7ff',
+
+    // ---- RETIRED in water v2 -------------------------------------------
+    // The nappe/jet knobs below are dead: the real fluid pours over the crest
+    // and squirts through the breach by itself, so drawing a hand-traced
+    // ballistic sheet on top of it only fought the simulation. Kept so nothing
+    // that still reads CONFIG.render.* breaks; delete on the next config sweep.
     // ---- OVERTOPPING NAPPE (deterministic, drawn from water.weirFlow) ----
     // One translucent sheet per contiguous overtopping run, on a ballistic
     // trajectory from the crest to the toe. Never particles: a cloud of sprites
@@ -405,10 +465,10 @@ export const CONFIG = {
     ringR0: 0.35,                       // m
     ringR1: 2.6,                        // m
     ringWidthPx: 3.5,
-    maxMist: 16,                         // hard cap on live mist sprites
-    maxFoam: 14,                        // ditto for foam puffs
+    maxMist: 8,                          // hard cap on live mist sprites
+    maxFoam: 8,                         // ditto for foam puffs
     foamSpriteAlpha: 0.24,              // per-sprite cap (was 0.8: they stacked white)
-    mistAlpha: 0.09,                    // per-sprite cap: bounds cumulative haze
+    mistAlpha: 0.07,                    // per-sprite cap: bounds cumulative haze
 
     // submerged structure readability
     wetAlpha: 0.82,                     // alpha of members redrawn over the water
@@ -425,10 +485,11 @@ export const CONFIG = {
     splinterLife: 1.5,
     mistLife: 1.1,
     breakParticles: 18,
-    impactParticles: 9,
-    breachRate: 9,                      // particles/s at a breach mouth: the JET is
-                                        // drawn by waterRenderer, this is only torn spray
-    overtopRate: 5,                     // ditto — the nappe sheet is the waterfall
+    impactParticles: 4,
+    breachRate: 3,                      // particles/s at a breach mouth. The breach flow
+                                        // is REAL FLUID tearing through the gap now, so
+                                        // this is a thin torn-spray garnish, nothing more
+    overtopRate: 1.6,                   // ditto — the fluid ITSELF is the waterfall
     emitThrottle: 0.05,                 // s between re-emits from repeated events
     jetHold: 0.35,                      // s a breach/overtop keeps spraying after last event
     shakeDecay: 7,                      // exponential decay per second
@@ -449,6 +510,20 @@ export const CONFIG = {
     dbgArrowEvery: 6,                   // draw a water velocity arrow every N boundaries
     dbgMinMemberPx: 34,                 // screen length before a load % label is drawn
     dbgBlockedPx: 3,                    // width of a blocked-interval bar
+
+    // water v2 debug layers (cycled with P while the F2 overlay is up):
+    // particles → particles+pressure → pressure → none
+    dbgParticlePx: 2.4,                 // device px per particle dot
+    dbgParticleMax: 14000,              // safety cap on dots per frame
+    dbgSpeedRef: 8,                     // m/s at the top of the speed ramp
+    dbgSpeedRamp: ['#2a4bff', '#00b7ff', '#3dffd0', '#ffe066', '#ff5a3c'],
+    dbgPressAlpha: 0.55,                // alpha of the fullest pressure cell
+    dbgPressColor: '#ff8348',           // hot end of the pressure heat map
+    dbgPressCold: '#1b3fa0',            // cold end
+    dbgPressMinPx: 1.5,                 // stop drawing cells smaller than this
+    dbgLayerLabel: true,                // name the active layer in the panel
+    dbgPanelTopPx: 58,                  // device px below the top edge: clears the
+                                        // HUD title, which used to sit on the FPS line
 
     // hud / screens
     timerUrgent: 10,                    // s remaining where the timer goes urgent

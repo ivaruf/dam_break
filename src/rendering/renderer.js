@@ -247,8 +247,11 @@ export function render(ctx, cam, S) {
 //   1. a member under stress is never hidden by 4 m of blue (or by a waterfall);
 //   2. the SUBMERGED structure stays readable at all — material identity and
 //      stress colour both — instead of dissolving into the reservoir.
-// Called from waterRenderer.js at the end of its pass.
-export function renderStressOverlay(ctx, cam, S) {
+// Called from waterRenderer.js at the end of its pass. `wetTest(x,y) => bool` is
+// the water v2 particle probe: the derived depth columns cannot answer "is this
+// member under water" any more, because a waterfall plume bins into them as
+// metres of depth over dry downstream ground.
+export function renderStressOverlay(ctx, cam, S, wetTest) {
   if (!S || !S.structure) return;
   beginFrame(ctx, cam);
   const t = S.simTime || 0;
@@ -260,7 +263,7 @@ export function renderStressOverlay(ctx, cam, S) {
     const m = members[i];
     if (m.broken || !m.mat) continue;
     const stressed = m.load > R.stressWarn;
-    const wet = w ? isSubmerged(w, m) : false;
+    const wet = wetTest ? isWetMember(wetTest, m) : (w ? isSubmerged(w, m) : false);
     if (!stressed && !wet) continue;      // dry and calm: the base pass has it
     if (stressed) drawMember(ctx, m, t, false);
     else drawWetMember(ctx, m);
@@ -269,7 +272,14 @@ export function renderStressOverlay(ctx, cam, S) {
   ctx.restore();
 }
 
-// midpoint below the local water surface
+// Three probes (both ends + midpoint) so a column standing half out of the
+// reservoir still counts as wet and gets redrawn above the water.
+function isWetMember(wetTest, m) {
+  return wetTest((m.a.x + m.b.x) * 0.5, (m.a.y + m.b.y) * 0.5) ||
+    wetTest(m.a.x, m.a.y) || wetTest(m.b.x, m.b.y);
+}
+
+// midpoint below the local water surface (fallback when no particle probe)
 function isSubmerged(w, m) {
   const mx = (m.a.x + m.b.x) * 0.5;
   const i = Math.floor((mx - w.x0) / w.cellW);
