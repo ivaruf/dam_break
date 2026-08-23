@@ -228,8 +228,9 @@ import { on, off, emit } from '../core/events.js';
 | `sim:start` / `sim:reset` | `{}`                                  | game    |
 | `level:win` / `level:fail`| `{stats}` (fail adds `{cause}`)       | modes   |
 | `phase:change`   | `{phase}`                                      | game    |
-| `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` `ui:undo` | | hud |
+| `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` `ui:undo` `ui:redo` `ui:delete` `ui:clear` | | hud |
 | `ui:level`       | `{index}` (1-based campaign index)             | screens |
+| `design:change`  | `{action:'place'\|'delete', id}` (sounds/UI refresh) | builder |
 | `input:down/move/up` | `{x, y, px, py, id}` (world + pixel)       | input   |
 | `input:pan` `{dx,dy}` px · `input:zoom` `{px,py,factor}` · `input:key` `{key}` | | input |
 
@@ -252,7 +253,8 @@ Game exposes to other modules (import `src/core/game.js`):
 
 ```js
 game.getScene() => {phase, terrain, water, structure, design, level, camera,
-                    ghost, selection, simSpeed, buildTimer, stats}
+                    simSpeed, buildTimer, simTime, stats}
+// ghost + selection + tool + hover state live in build/builder.js getBuilder()
 game.loadLevel(id) · game.release() · game.retry() · game.toEdit() ·
 game.setSpeed(v) · game.loadTestScene(i)  // physics test scenes 1–8
 ```
