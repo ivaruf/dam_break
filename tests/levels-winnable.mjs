@@ -90,8 +90,10 @@ for (let i = 1; i <= LEVELS.length - 1; i++) {
 // timber. Assert both halves, or the level teaches nothing.
 console.log('\nlevel 5 — the wave must break timber and spare steel:');
 {
-  // same geometry both times (the intended crest) — only the material changes
-  const shape = { crest: 7.4, dy: 0.9 };
+  // same geometry both times (the intended crest) — only the material changes.
+  // KEEP IN SYNC with INTENDED[5] in tests/levels-intended.mjs: the contrast is
+  // only honest if both sides are built to the shape the level actually teaches.
+  const shape = { crest: 10.0, dy: 0.9 };
   const timber = simulate(5, (S) => engineered(S, { ...shape, col: 'timber', span: 'timber', brace: 'timber' }));
   const steel = simulate(5, (S) => engineered(S, { ...shape, col: 'steel', span: 'steel', brace: 'steel' }));
   console.log('   timber columns: ' + (timber.win ? 'WIN ' : 'FAIL') + ' brk' + timber.broken +

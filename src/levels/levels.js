@@ -59,7 +59,8 @@ export const LEVELS = [
 
   // ------------------------------------------------------------------ 2 --
   // intended solution: a braced timber wall across the 3.5 m sill
-  // A(33,4.6)-B(36.5,4.6), 4 rows to a crest of 7.4 m: 16 members, about $520. Steel is unlocked but not needed.
+  // A(33,4.6)-B(36.5,4.6), 4 rows of 0.8 m to a crest of 7.8 m: 16 members,
+  // about $520. Steel is unlocked but not needed.
   // difficulty note: deeper water than 1 and a wider sill, so an UNBRACED
   // rectangle should visibly rack before it seals. Still naive-winnable by
   // design — bracing is the lesson, not material choice.
@@ -134,7 +135,7 @@ export const LEVELS = [
   // at DIFFERENT heights, on a sill that slopes away downstream. Two columns
   // founded on the sill (x=33.7, x=37.3) split the crossing into three ~3.7 m
   // bays; concrete verticals, steel rungs and diagonals, cable corner ties.
-  // 31 members, about $6,280.
+  // 31 members, about $6,560.
   // difficulty note: the naive flat-crested wall puts one column on each bank
   // and tries to rung 11 m straight across — every rung and every diagonal is
   // refused (nothing reaches past steel's 7 m), so it fails with an open face.
@@ -172,14 +173,22 @@ export const LEVELS = [
 
   // ------------------------------------------------------------------ 5 --
   // intended solution: an 8 m sill A(32,3.6)-B(40,3.8) needing one pier on the
-  // bed near x=36, built in STEEL THROUGHOUT (crest 7.4 m, ~$5,550) because
-  // what arrives is not a rising pond but 120 m2 of water off the ledge at
-  // x=3-10 in six seconds. Timber bracing splits under that impact.
-  // difficulty note: the whole point is the contrast, and it is measured —
-  // the same geometry in timber breaks (2 members unbraced, 17 braced) while
-  // the steel version takes 18% load and holds. In freebuild the flood clock
-  // starts at RELEASE, so the delay is just a short beat before the pulse
-  // drops off the ledge. tests/levels-winnable.mjs asserts both sides.
+  // bed near x=36, built in STEEL THROUGHOUT to a crest of 10.1 m (~$7,740)
+  // because what arrives is not a rising pond but 154 m2 of water off the ledge
+  // at x=3-10 in five and a half seconds. Timber bracing splits under that
+  // impact.
+  // The crest is tall for a 3.8 m sill on purpose. This basin is barely bigger
+  // than the wave (154 m2 into ~177 m2 of capacity to 9.8 m), and under the
+  // particle fluid the whole pulse now arrives instead of parking on the
+  // upstream slope, so the reservoir settles around 9 m. Measured: the same
+  // steel dam retains 80% at a 9.2 m crest (i.e. it fails the 80% bar) and 86%
+  // at 10.1 m. Below that it is simply topped, however strong it is.
+  // difficulty note: the whole point is the contrast, and it is measured — the
+  // same geometry in timber breaks (29 members, 274% load, 56% retained) while
+  // the steel version takes 27% load, holds, and retains 86% against the 80%
+  // target. In freebuild the flood clock starts at RELEASE, so the delay is
+  // just a short beat before the pulse drops off the ledge.
+  // tests/levels-winnable.mjs asserts both sides.
   // (Countdown mode is PARKED per user decision — `countdown` kept for when
   // timed play returns; the old tuning was delay 30 against a 35 s timer.)
   {
@@ -197,10 +206,13 @@ export const LEVELS = [
       initial: [],
       // rate 28 (was 20 under countdown): a wave meeting a standing dam piles
       // up more gently than one that met a wall appearing mid-flow, so the
-      // pulse is fatter to keep the timber-breaks/steel-holds contrast.
-      flood: { x: 5, rate: 28, duration: 6, delay: 2 },
+      // pulse is fatter to keep the timber-breaks/steel-holds contrast. The
+      // RATE is the lesson (impact), so v2 retuning shortened the pulse instead:
+      // duration 5.5 (was 6) = 154 m2, because the particle fluid delivers the
+      // whole pulse into the basin instead of parking part of it upstream.
+      flood: { x: 5, rate: 28, duration: 5.5, delay: 2 },
     },
-    budget: 7710,
+    budget: 10750,
     materials: ['timber', 'steel', 'concrete', 'cable'],
     objective: { type: 'retain', minRetention: 0.8, duration: 45 },
     hints: [
@@ -218,10 +230,16 @@ export const LEVELS = [
   // piers on the bed (x=42, x=50) split them into four ~4 m bays. The money
   // lesson: steel rungs across the bays, but CABLE for the diagonals — the
   // diagonal only ever pulls, and cable buys ~2.6x the tensile strength per
-  // dollar. Roughly $3,600 against a deliberately tight budget.
-  // difficulty note: budget is only ~1.19x the intended solution, so reflexively
-  // X-bracing everything in steel runs out of money before the crossing is
-  // closed. This is the only level tuned on cost rather than geometry.
+  // dollar. Crest 7.6 m, roughly $5,320 against a deliberately tight budget.
+  // difficulty note: budget is only ~1.39x the intended solution, so reflexively
+  // X-bracing everything in steel — $8,640 for the SAME shape, measured — runs
+  // out of money before the crossing is closed. This is the only level tuned on
+  // cost rather than geometry.
+  // v2 retuning: the intended dam was overtopping by ~1 m and landing on 94%
+  // against the 95% target. Building it TALLER measured WORSE (crest 8.5 m ->
+  // 75% retained: the extra rows cost money, add weight, and a cable-braced
+  // face has no sealing above the rungs), so the flood was trimmed instead —
+  // duration 33 -> 30. The intended crest now holds 99%.
   {
     id: 'level-06',
     name: 'Broad Water',
@@ -236,7 +254,8 @@ export const LEVELS = [
     buildZone: { x0: 36, x1: 55 },
     water: {
       initial: [{ x0: 23, x1: 30, surface: 4.0 }],
-      flood: { x: 2, rate: 4.53, duration: 33, delay: 0 },
+      // duration 30 (was 33) = 136 m2: v2 lands the whole flood in the basin.
+      flood: { x: 2, rate: 4.53, duration: 30, delay: 0 },
     },
     budget: 7380,
     materials: ['timber', 'steel', 'concrete', 'cable'],
@@ -260,6 +279,12 @@ export const LEVELS = [
   // difficulty note: naive-winnable ON PURPOSE, like 1 and 2 — a braced wall
   // on either pair of anchors seals. The lesson is reading the terrain for the
   // cheaper option, which the budget rewards but does not force.
+  // v2 retuning: the flood is the ONLY thing that may be softened here, because
+  // the lesson is irregular ground, not height — the full 102 m2 topped the
+  // 2.4 m naive wall and the level stopped being a teaching level. Trimmed 18%
+  // to 83 m2, which puts 11 of the 30 naive presets back over the line (cheapest
+  // $438/480 at 91% retained) while doing nothing for an empty valley: no dam
+  // still retains only 73% against the 85% target.
   {
     id: 'level-07',
     name: 'Two Steps',
@@ -274,7 +299,8 @@ export const LEVELS = [
     buildZone: { x0: 29, x1: 42 },
     water: {
       initial: [{ x0: 20, x1: 25, surface: 4.3 }],
-      flood: { x: 2, rate: 3.78, duration: 27, delay: 0 },
+      // duration 22 (was 27) = 83 m2: keeps the naive wall winnable under v2.
+      flood: { x: 2, rate: 3.78, duration: 22, delay: 0 },
     },
     budget: 480,
     materials: ['timber', 'steel', 'concrete', 'cable'],
@@ -373,8 +399,8 @@ export const LEVELS = [
   // A(55,6.0)-B(63,6.2)-C(71,6.4) needing two piers on the bed (x=59, x=67),
   // concrete verticals for 7 m of water, steel rungs and diagonals across four
   // ~4 m bays, and cable ties from each outer base to the opposite crest so
-  // the whole dam cannot rack as one piece. Crest around 12.8 m. Roughly
-  // $16,000 against a $22,000 budget.
+  // the whole dam cannot rack as one piece. Crest 13.4 m. Roughly
+  // $16,250 against a $22,560 budget.
   // difficulty note: deepest reservoir in the game. 93%
   // retention means the face has to be genuinely watertight, not merely
   // standing. Fable: this is the level to tune LAST — everything before it

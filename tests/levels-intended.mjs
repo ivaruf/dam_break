@@ -16,6 +16,11 @@
 //   col/span/brace/tie = material per structural role
 //   crest              = target crest elevation (world y, metres)
 //   dy                 = row spacing; xMin/xMax = restrict to some anchors
+//
+// `crest` is a TARGET: engineered() rounds it up to a whole number of dy rows
+// above the highest column foot, so the dam actually built can stand up to one
+// row higher than the number here. The crests quoted in the levels.js comments
+// are the BUILT ones.
 
 import { boot, simulate, engineered, fmt } from './levels-designs.mjs';
 
@@ -28,7 +33,10 @@ export const INTENDED = {
         note: 'pier on the channel bed + concrete columns, steel bracing' },
   4:  { crest: 7.4,  col: 'concrete', span: 'steel',  brace: 'steel', tie: 'cable', dy: 0.9,
         note: 'concrete columns founded in the pit, steel rungs, cable tie' },
-  5:  { crest: 7.4,  col: 'steel',    span: 'steel',  brace: 'steel',  dy: 0.9,
+  // 5's crest is TALL (built 10.1 m on a 3.8 m sill) because the basin barely
+  // exceeds the wave: under the particle fluid the reservoir settles near 9 m,
+  // so anything shorter is topped no matter how strong it is.
+  5:  { crest: 10.0, col: 'steel',    span: 'steel',  brace: 'steel',  dy: 0.9,
         note: 'steel throughout — timber bracing splits under the impact' },
   6:  { crest: 7.4,  col: 'timber',   span: 'steel',  brace: 'cable',  dy: 0.9,
         note: 'two piers, steel rungs, CABLE diagonals (the money lesson)' },
