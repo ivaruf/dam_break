@@ -145,11 +145,38 @@ structure = {
 (game-newtons). `constraints.stepStructure` applies `a = f·invMass + g`, then
 zeroes the accumulators. Nobody else zeroes them.
 
-### Water (owned by Opus A) — 1-D shallow-water column grid (DIRECTOR DECISION)
+### Water (owned by Opus A) — v2: PIC/FLIP particle-grid fluid (DIRECTOR DECISION)
 
-Bulk water is a column heightfield with per-boundary flow (pipe model /
-shallow-water style). Visual particles are decorative only (Opus C). This is
-final for v1 — no particle-based bulk sim.
+v2 replaces the v1 column heightfield with a **PIC/FLIP hybrid**: the water IS
+particles (typed arrays), advected through a MAC grid pressure solve
+(incompressible, Gauss-Seidel fixed iterations, solid cells from terrain).
+Structural members enter the fluid as **capsule colliders**; water→structure
+forces come from the fluid solve itself (solid-boundary pressure and/or
+contact impulses), so hydrostatics, wave impact, leak jets, overtopping and
+splashes all EMERGE — nothing is scripted. No external engine or dependency:
+hand-rolled, DOM-free, deterministic (fixed timestep, fixed iteration order,
+no Math.random; seeding/emission jitter must be hash-based).
+
+**Public API compatibility is mandatory.** The v1 query surface stays:
+`createWater(terrain, cfg)`, `stepWater`, `addWater{x0,x1,surface}`,
+`addSource{x,rate,duration,delay}`, `surfaceAt/depthAt/velAt/volumeBetween`,
+`stats.totalIn`, and the derived per-column arrays `x0, cellW, n, bed, depth,
+vel` are REBUILT each tick from particle binning so renderer/modes/HUD keep
+working unchanged. New v2 surface for renderer/coupling:
+
+```js
+water.pcount, water.ppx, water.ppy, water.pvx, water.pvy  // particle state (typed arrays)
+water.setColliders(water, capsules)  // [{ax,ay,bx,by,r,ref}] from coupling; replaces blocked-interval rasterization
+water.colliderForces                 // per-ref accumulated {fx, fy, applicationY…} from the solve
+```
+
+Hard gates before integration (tests/run.js equivalents): analytic hydrostatic
+total force on a wall within ±30% of ½ρgH², bottom-quartile band ≥ 3× top
+band; a settled reservoir is CALM (flat surface, no popcorn, steady wall load);
+ZERO tunneling through a sealed wall (substep CFL clamp); dam-break front with
+impact peak ≥ 2.5× its static follow-on; hole → jet + faster drain; overtop;
+progressive collapse; exact two-run determinism; perf ≥ 4000 particles + 250
+members ≤ 6 ms/tick in Node on this machine.
 
 ```js
 water.createWater(terrain, cfg) => water
@@ -179,18 +206,20 @@ crest (weir-like), momentum so a flood front arrives as a moving wave.
 ### Coupling (owned by Opus A) — THE most important module
 
 ```js
-coupling.updateObstructions(structure, water)
-  // Rasterize every unbroken member with mat.sealing into blocked y-intervals
-  // per water boundary the segment crosses; merge overlaps; write via
-  // setBoundaryBlocks. Broken members leave the profile → breach emerges.
+coupling.updateObstructions(structure, water)   // v2: name kept for compat
+  // Build the capsule collider list from every unbroken member with
+  // mat.sealing (radius from mat.thickness/2) and hand it to
+  // water.setColliders. Broken members drop out → breach emerges physically.
 
 coupling.applyWaterForces(structure, water, dt)
-  // For each sealing member segment: sample local depth each side (segment
-  // normal decides sides), hydrostatic p = ρ·g·depth·pressureScale, net force
-  // ⊥ to segment over submerged length, half to each node.
-  // Add dynamic impact term ~ ρ·v²·impactScale for moving water hitting a face.
-  // Buoyancy + drag on submerged nodes and debris (drag toward water.velAt).
-  // Emits events: 'water:impact' (first strong hits), 'breach', 'overtop'.
+  // Distribute water.colliderForces (from the fluid solve) onto the two end
+  // nodes of each member by lever arm; scale knobs live in CONFIG.coupling.
+  // Buoyancy + drag on submerged nodes and debris via the fluid velocity field.
+  // Emits the SAME events with the same semantics: 'water:impact' (strong
+  // fast-water hits, ≥3 m/s), 'breach' {x,y,flow} and 'overtop' {x,flow}
+  // re-firing ~0.3 s while flow persists, derived from particle flux through
+  // gaps in / over a mostly-sealed dam region (renderer nappe/jets read these
+  // until the particle-true rendering round replaces them).
 ```
 
 Water depth MUST increase load (hydrostatic), and fast water MUST hit harder
