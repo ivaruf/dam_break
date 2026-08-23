@@ -11,8 +11,9 @@
 // window.DAM = {game, emit} and should return a JSON-serializable summary.
 
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
@@ -47,9 +48,15 @@ const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '1
 });
 
 // --- chrome ------------------------------------------------------------
+// Fresh profile per run: a persisted profile keeps the versioned service
+// worker, which then serves the PREVIOUS deploy from cache — correct for
+// players, fatal for QA (you test stale code without noticing).
+const profile = mkdtempSync(path.join(tmpdir(), 'dam-builder-qa-'));
+process.on('exit', () => { try { rmSync(profile, { recursive: true, force: true }); } catch {} });
+
 const chrome = spawn(CHROME, [
   '--headless=new', '--remote-debugging-port=0', '--no-first-run',
-  '--user-data-dir=/tmp/dam-builder-qa-profile', '--window-size=1280,800',
+  `--user-data-dir=${profile}`, '--window-size=1280,800',
   '--hide-scrollbars', '--disable-gpu', 'about:blank',
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
@@ -116,11 +123,13 @@ onEvent('Runtime.exceptionThrown', sessionId, (p) => {
 note('navigate');
 const loaded = new Promise((r) => onEvent('Page.loadEventFired', sessionId, r));
 await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/index.html` }, sessionId);
-await Promise.race([loaded, sleep(20000).then(() => console.error('WARN: load event timeout, continuing'))]);
+await Promise.race([loaded, sleep(6000).then(() => console.error('WARN: load event timeout, continuing'))]);
 note('after-load');
 await sleep(600);
 
 // --- scenario -----------------------------------------------------------
+const PRE = opt('pre', null); // JS statement(s) evaluated before the --eval file
+if (PRE) await send('Runtime.evaluate', { expression: PRE }, sessionId);
 if (EVAL) {
   const src = readFileSync(EVAL, 'utf8');
   const res = await send('Runtime.evaluate', {

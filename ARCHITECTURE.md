@@ -221,10 +221,10 @@ import { on, off, emit } from '../core/events.js';
 
 | event            | payload                                        | emitter |
 |------------------|------------------------------------------------|---------|
-| `member:break`   | `{id, x, y, mode, matId}`                      | stress  |
-| `water:impact`   | `{x, y, speed, magnitude}`                     | coupling|
-| `breach`         | `{x, y, flow}`                                 | coupling|
-| `overtop`        | `{x, flow}`                                    | coupling|
+| `member:break`   | `{id, x, y, mode, matId, load}` (load = pre-break severity) | stress  |
+| `water:impact`   | `{x, y, speed, magnitude, dir}` (dir = ±1 flow sign) | coupling|
+| `breach`         | `{x, y, flow}` — re-fires ~every 0.3 s while flow lasts | coupling|
+| `overtop`        | `{x, flow}` — re-fires ~every 0.3 s while flow lasts | coupling|
 | `sim:start` / `sim:reset` | `{}`                                  | game    |
 | `level:win` / `level:fail`| `{stats}` (fail adds `{cause}`)       | modes   |
 | `phase:change`   | `{phase}`                                      | game    |
@@ -279,6 +279,7 @@ game.setSpeed(v) · game.loadTestScene(i)  // physics test scenes 1–8
            | {type:'survive', duration:60}
            | {type:'protect', x0, x1, maxDepth:0.3, duration:60},
   hints: ['...'],
+  props: [{type:'pine'|'tree'|'rock'|'house'|'sign', x, y?, scale?}], // decor only
 }
 ```
 
@@ -288,6 +289,10 @@ game.setSpeed(v) · game.loadTestScene(i)  // physics test scenes 1–8
 
 ```js
 renderer.render(ctx, camera, scene)        // terrain, anchors, buildZone, structure
+renderer.renderStressOverlay(ctx, camera, scene)
+   // documented exception to "renderer draws before waterRenderer":
+   // waterRenderer calls this at the end of its own pass so overloaded
+   // members stay readable under deep water
                                            // members colored by load (tension cool,
                                            // compression warm, flashing >0.8, thickness
                                            // + slight deform near failure), design ghosts
