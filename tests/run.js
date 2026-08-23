@@ -137,6 +137,13 @@ function scene4() {
       },
     });
     t.eq(ctx.structure.brokenCount, 0, 'strong wall does not break');
+    let peakLf = 0, liveFx = 0;
+    for (const n of ctx.structure.nodes) {
+      peakLf = Math.max(peakLf, Math.abs(n.lfx) + Math.abs(n.lfy));
+      liveFx += Math.abs(n.fx) + Math.abs(n.fy);
+    }
+    t.gt(peakLf, 1, 'lfx/lfy keep the external force for the debug overlay');
+    t.eq(liveFx, 0, 'fx/fy are still zeroed by the solver (contract)');
     t.gt(sample.bottom, 2 * sample.top, 'bottom-bay load > 2x top-bay load at t=2s (settled)');
     const endBottom = avgLoad(ctx.structure, bottomMembers);
     const endTop = avgLoad(ctx.structure, topMembers);
@@ -207,6 +214,13 @@ function scene6() {
   t2.gt(waveCtx.structure.brokenCount, 0, 'the moving wave breaks the wall');
   t2.gt(rec.impacts.length, 0, 'at least one water:impact recorded');
   t2.gt(peakVel, A.scene6WaveSpeed, 'peak velocity near the dam exceeds threshold');
+  // payload fields the effects layer scales its shake/splash by
+  const br = rec.breaks[0];
+  t2.gt(br.load, 1, "member:break carries the pre-zeroed load as 'load'");
+  const imp = rec.impacts[0];
+  t2.ok(imp.dir === 1 || imp.dir === -1, "water:impact carries dir +1/-1", `dir=${imp.dir}`);
+  t2.ok(rec.impacts.every((i) => i.speed >= 0), 'water:impact speed stays unsigned');
+  t2.eq(imp.dir, 1, 'the downstream-travelling wave reports dir +1');
   const passWave = printSuite(t2);
 
   return passStatic && passWave;

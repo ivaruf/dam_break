@@ -26,6 +26,15 @@ export function stepStructure(structure, terrain, dt) {
   const iters = Math.max(1, P.iterations | 0);
   const dIters = Math.max(1, P.debrisIterations | 0);
 
+  // Debug snapshot: coupling has already written this tick's external forces and
+  // the solver is about to consume and zero them, so keep a copy for the F2
+  // overlay's force arrows. Plain fields, written once per tick, no allocation.
+  for (const n of structure.nodes) { n.lfx = n.fx; n.lfy = n.fy; }
+  for (const d of structure.debris) {
+    d.a.lfx = d.a.fx; d.a.lfy = d.a.fy;
+    d.b.lfx = d.b.fx; d.b.lfy = d.b.fy;
+  }
+
   for (let s = 0; s < sub; s++) {
     integrate(structure.nodes, h, P, P.velDamping);
     for (const m of structure.members) m.lambda = 0;

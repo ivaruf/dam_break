@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v0.1.0'; // scaffold
+const VERSION = 'v1.0.0'; // first complete release: 10-level campaign + sandbox
 const CACHE = `dambuilder-${VERSION}`;
 
 const ASSETS = [

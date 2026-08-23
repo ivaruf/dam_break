@@ -323,8 +323,11 @@ export function applyWaterForces(structure, water, dt) {
             // remember how fast the water was, not just how much of it: a tall
             // wall in a slowly filling pond integrates a big force out of a
             // gentle current, and that is not an impact
-            const sp = Math.max(vL > 0 ? vL : 0, vR < 0 ? -vR : 0);
-            if (sp > ST.impactSpeed[mi]) ST.impactSpeed[mi] = sp;
+            // signed: +1 = the blow came from the left (water heading +x)
+            const spL = vL > 0 ? vL : 0;
+            const spR = vR < 0 ? -vR : 0;
+            const sp = spL >= spR ? spL : -spR;
+            if (Math.abs(sp) > Math.abs(ST.impactSpeed[mi])) ST.impactSpeed[mi] = sp;
           }
         }
       }
@@ -411,7 +414,7 @@ function emitEvents(structure, water, C) {
     for (let i = 0; i < ST.impactMag.length; i++) {
       const mag = ST.impactMag[i];
       if (mag <= bestMag) continue;
-      if (ST.impactSpeed[i] < C.impactSpeedMin) continue;   // fast, not merely deep
+      if (Math.abs(ST.impactSpeed[i]) < C.impactSpeedMin) continue; // fast, not merely deep
       if (ST.clock - ST.lastImpact[i] < C.impactCooldown) continue;
       best = i; bestMag = mag;
     }
@@ -421,7 +424,13 @@ function emitEvents(structure, water, C) {
       const y = (m.a.y + m.b.y) * 0.5;
       ST.lastImpact[best] = ST.clock;
       ST.lastImpactEvent = ST.clock;
-      emit('water:impact', { x, y, speed: ST.impactSpeed[best], magnitude: bestMag });
+      const vel = ST.impactSpeed[best];
+      emit('water:impact', {
+        x, y,
+        speed: Math.abs(vel),
+        dir: vel >= 0 ? 1 : -1,           // which way the water was travelling
+        magnitude: bestMag,
+      });
     }
   }
 

@@ -1,116 +1,121 @@
-// QA scenario (page context via tools/drive.mjs --eval).
-// THE Definition-of-Done finale: build two visibly different dams, release the
-// SAME flood against both, and require meaningfully different results.
+// QA acceptance (page context via tools/drive.mjs --eval).
+// Definition-of-done finale on level 5 (The Wave): the SAME full-span braced
+// wall geometry, built in timber vs steel, against the SAME falling flood —
+// the results must differ meaningfully (timber splits, steel takes the hit).
 //
-// Dam A (weak): a single line of unbraced timber posts.
-// Dam B (strong): concrete wall face + timber triangulation + anchored base.
+// window.QA_SHOTMODE: run only the timber wall at 2x and stop shortly after
+// the wave lands, so the driver screenshot catches the impact.
+const LEVEL = window.QA_LEVEL || 5;
+const CREST = window.QA_CREST || 7.4;
+const DY = window.QA_DY || 0.9;
+const SHOT = !!window.QA_SHOTMODE;
+
 const { game, emit } = window.DAM;
 
-function clearDesign(S) {
+let uid = 0;
+function buildWall(S, mat, style) { // 'posts' | 'frame' | 'truss'
   S.design.nodes.length = 0;
   S.design.members.length = 0;
-}
+  const N = (x, y, anchorId = null) => {
+    const id = 'qn' + (++uid);
+    S.design.nodes.push({ id, x, y, anchorId });
+    return id;
+  };
+  const M = (a, b) => S.design.members.push({ id: 'qmm' + (++uid), a, b, mat });
 
-function damSite(S) {
-  // build across the middle anchors of the level
+  // columns: one on each anchor, one mid-pier resting on bare ground
   const as = [...S.terrain.anchors].sort((p, q) => p.x - q.x);
-  const mid = as[Math.floor(as.length / 2)];
-  return { as, x: mid.x, ground: S.terrain.heightAt(mid.x) };
-}
+  const xs = [as[0].x, (as[0].x + as[as.length - 1].x) / 2, as[as.length - 1].x];
+  const anchorIds = [as[0].id, null, as[as.length - 1].id];
 
-let uid = 0;
-const N = (S, x, y, anchorId = null) => {
-  const id = 'qn' + (++uid);
-  S.design.nodes.push({ id, x, y, anchorId });
-  return id;
-};
-const M = (S, a, b, mat) => S.design.members.push({ id: 'qmm' + (++uid), a, b, mat });
+  // mirror of the harness 'engineered' builder: columns subdivided from their
+  // own ground up to a shared base, then aligned rows every DY to the crest
+  const bases = xs.map((x) => S.terrain.heightAt(x));
+  const base = Math.max(...bases);
+  const rows = Math.max(1, Math.ceil((CREST - base) / DY));
 
-function buildWeak(S, h) {
-  const { x, ground } = damSite(S);
-  // lone timber posts stacked into a tall unbraced wall
-  let prev = N(S, x, ground, nearestAnchor(S, x));
-  for (let y = ground + 1.5; y <= ground + h; y += 1.5) {
-    const n = N(S, x, y);
-    M(S, prev, n, 'timber');
-    prev = n;
+  const grid = xs.map((x, c) => {
+    let prev = N(x, bases[c], anchorIds[c]);
+    const subs = Math.max(0, Math.ceil((base - bases[c]) / DY - 1e-6));
+    for (let k = 1; k <= subs; k++) {
+      const n = N(x, Math.min(base, bases[c] + k * DY));
+      M(prev, n);
+      prev = n;
+    }
+    const nodes = [prev];
+    for (let r = 1; r <= rows; r++) {
+      const n = N(x, base + r * DY);
+      M(prev, n);
+      prev = n;
+      nodes[r] = n;
+    }
+    return nodes;
+  });
+
+  if (style !== 'posts') {
+    for (let r = 1; r <= rows; r++) {
+      for (let c = 0; c + 1 < grid.length; c++) M(grid[c][r], grid[c + 1][r]);
+    }
+    if (style === 'truss') {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c + 1 < grid.length; c++) M(grid[c][r], grid[c + 1][r + 1]);
+      }
+    }
   }
 }
 
-function nearestAnchor(S, x) {
-  let best = null, bd = 1e9;
-  for (const a of S.terrain.anchors) {
-    const d = Math.abs(a.x - x);
-    if (d < bd) { bd = d; best = a; }
-  }
-  return best && bd < 1.0 ? best.id : null;
-}
-
-function buildStrong(S, h) {
-  const { as } = damSite(S);
-  const mats = S.level.materials;
-  const face = mats.includes('concrete') ? 'concrete' : mats[0];
-  const brace = mats.includes('steel') ? 'steel' : mats[0];
-  const x = as[Math.floor(as.length / 2)].x;
-  const g = (xx) => S.terrain.heightAt(xx);
-
-  // vertical face in short segments + rear support column + triangulated bracing
-  const rows = [];
-  const step = 1.5;
-  for (let y = g(x); y <= g(x) + h + 0.01; y += step) rows.push(y);
-  const faceIds = rows.map((y, i) => N(S, x, y, i === 0 ? nearestAnchor(S, x) : null));
-  for (let i = 1; i < faceIds.length; i++) M(S, faceIds[i - 1], faceIds[i], face);
-
-  const bx = x + 2.2;
-  const backIds = rows.slice(0, -1).map((y, i) => N(S, bx, y, i === 0 ? nearestAnchor(S, bx) : null));
-  for (let i = 1; i < backIds.length; i++) M(S, backIds[i - 1], backIds[i], brace);
-  M(S, faceIds[0], backIds[0], face); // base tie
-  for (let i = 0; i < backIds.length; i++) {
-    M(S, faceIds[i], backIds[i], brace);                      // horizontal ties
-    if (i + 1 < faceIds.length) M(S, backIds[i], faceIds[i + 1], brace); // diagonals
-    if (i + 1 < backIds.length) M(S, faceIds[i], backIds[i + 1], brace); // counter-diagonals
-  }
-}
-
-async function runSim(maxSeconds) {
-  game.release();
-  game.setSpeed(4);
-  const t0 = performance.now();
-  while (game.getScene().phase === 'sim' && performance.now() - t0 < maxSeconds * 1000) {
-    await new Promise((r) => setTimeout(r, 250));
-  }
+async function runOne(mat, style, speed, stopAfterImpact) {
+  emit('ui:level', { index: LEVEL });
+  await new Promise((r) => setTimeout(r, 400));
   const S = game.getScene();
+  buildWall(S, mat, style);
+  game.release();
+  game.setSpeed(speed);
+  const t0 = performance.now();
+  while (game.getScene().phase === 'sim' && performance.now() - t0 < 90000) {
+    await new Promise((r) => setTimeout(r, 200));
+    const s = game.getScene();
+    if (stopAfterImpact && s.structure &&
+        (s.structure.brokenCount > 0 ? s.simTime >= s.structure.firstFailure.time + 1.2
+                                     : s.simTime >= 36)) {
+      game.setSpeed(0.25); // slow-mo for the screenshot
+      return snapshot(s);
+    }
+  }
+  return snapshot(game.getScene());
+}
+
+function snapshot(S) {
   const st = S.structure;
   return {
-    endPhase: S.phase,
-    simTime: +S.simTime.toFixed(1),
+    mat: null, endPhase: S.phase, simTime: +S.simTime.toFixed(1),
     broken: st ? st.brokenCount : -1,
     maxLoad: st ? +st.maxLoad.toFixed(2) : -1,
-    firstFailure: st && st.firstFailure ? st.firstFailure.mode + '@' + st.firstFailure.time.toFixed(1) + 's' : null,
-    stats: S.stats,
+    firstFailure: st && st.firstFailure
+      ? st.firstFailure.mode + '@' + st.firstFailure.time.toFixed(1) + 's' : null,
+    win: S.stats ? S.stats.win : null,
+    retained: S.stats ? +S.stats.retained.toFixed(2) : null,
+    cause: S.stats ? S.stats.cause : null,
   };
 }
 
-const H = 5; // dam height above ground (m)
+if (SHOT) {
+  const shot = await runOne(window.QA_MAT || 'timber', window.QA_STYLE || 'truss', 2, true);
+  return { shot };
+}
 
-emit('ui:level', { index: 1 });
-await new Promise((r) => setTimeout(r, 400));
-let S = game.getScene();
-clearDesign(S);
-buildWeak(S, H);
-const weak = await runSim(50);
-
-emit('ui:level', { index: 1 });
-await new Promise((r) => setTimeout(r, 400));
-S = game.getScene();
-clearDesign(S);
-buildStrong(S, H);
-const strong = await runSim(50);
-
+// same geometry, same flood — only the material differs (the level's lesson:
+// a sudden impact is not the same as deep water; steel takes a hit, timber splits)
+const timber = await runOne('timber', 'truss', 4, false);
+timber.mat = 'timber truss';
+const steel = await runOne('steel', 'truss', 4, false);
+steel.mat = 'steel truss';
 return {
-  weak, strong,
+  timber, steel,
   verdict: {
-    weakBrokeMore: weak.broken > strong.broken,
-    differentOutcome: weak.broken !== strong.broken || (weak.stats && strong.stats && weak.stats.win !== strong.stats.win),
+    timberFailed: timber.win === false,
+    timberBroke: timber.broken > 0,
+    steelHeld: steel.broken === 0 && steel.win === true,
+    differentOutcome: timber.win !== steel.win && timber.broken !== steel.broken,
   },
 };

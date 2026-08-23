@@ -1,15 +1,76 @@
-/* DAM BUILDER — OPUS C owns this file. Fable scaffold: minimal working layout. */
+/* DAM BUILDER — OPUS C owns this file.
+   Instrument-panel UI over a canvas game world: dark blue-slate, restrained,
+   legible at a glance. Mobile-first (360×640 baseline), widened at 720px+.
+   No build step, no external assets/fonts — system font stack only. */
 
+/* ==================== TOKENS ==================== */
+:root {
+  /* surfaces */
+  --bg: #0d1b26;
+  --surface: #10222f;
+  --surface-2: #16344a;   /* raised: buttons, cards */
+  --surface-3: #1c3f57;   /* raised + hovered/active/selected */
+  --border: #26445a;
+  --border-strong: #3d6683;
+
+  /* text */
+  --text: #dfe9f0;
+  --text-dim: #93a7b5;
+  --text-faint: #61798c;
+
+  /* accent + semantic */
+  --accent: #35a7ff;
+  --accent-dim: #1d5f8a;
+  --accent-soft: rgba(53, 167, 255, 0.14);
+  --accent-glow: rgba(53, 167, 255, 0.45);
+  --warn: #ff9b35;
+  --warn-soft: rgba(255, 155, 53, 0.16);
+  --danger: #ff5a3c;
+  --danger-soft: rgba(255, 90, 60, 0.18);
+  --danger-glow: rgba(255, 90, 60, 0.5);
+  --good: #7fff9a;
+  --good-soft: rgba(127, 255, 154, 0.16);
+  --sandbox: #b39dff; /* freebuild/sandbox badge — neutral accent, not in the core palette */
+  --sandbox-soft: rgba(179, 157, 255, 0.16);
+  --on-accent: #06202e; /* dark text for use on bright accent-filled buttons */
+
+  /* the "release water" button gets its own warm identity — the single
+     most dangerous-looking control in the game */
+  --release-bg: #7a2818;
+  --release-bg-hot: #9a3620;
+  --release-border: var(--danger);
+
+  /* materials — must match src/build/materials.js colours exactly */
+  --mat-timber: #c8954a;
+  --mat-steel: #9fb2c4;
+  --mat-concrete: #b9c4cc;
+  --mat-cable: #e8d44d;
+
+  /* shape + shadow */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --scrim: rgba(0, 0, 0, 0.35);       /* dark overlay for contrast on light swatches/badges */
+  --scrim-screen: rgba(8, 16, 24, 0.9); /* the dimmed backdrop behind full-screen overlays */
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ==================== RESET / BASE ==================== */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
   height: 100%;
   overflow: hidden;
-  background: #0d1b26;
-  color: #dfe9f0;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  overscroll-behavior: none;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
   -webkit-user-select: none;
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #wrap { position: fixed; inset: 0; }
@@ -19,13 +80,103 @@ html, body {
   inset: 0;
   width: 100%;
   height: 100%;
-  touch-action: none;
+  touch-action: none; /* the player drags on the canvas to build — never let the browser pan/zoom it */
   display: block;
 }
 
 .hidden { display: none !important; }
 
-/* screens */
+/* ==================== BUTTONS ==================== */
+/* Shared button system. Every clickable control in the HUD and screens
+   inherits from this baseline, then layers on size/colour modifiers. */
+.big-btn, .small-btn, .tool-btn, .speed-btn, .level-card {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.big-btn {
+  font-size: clamp(16px, 4.4vw, 20px);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: clamp(12px, 3vw, 14px) clamp(20px, 6vw, 34px);
+  box-shadow: var(--shadow-sm);
+}
+.small-btn {
+  font-size: clamp(13px, 3.4vw, 15px);
+  font-weight: 600;
+  padding: 10px 18px;
+}
+.tool-btn {
+  font-size: 17px;
+  padding: 0;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.speed-btn {
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0 10px;
+  height: 44px;
+  flex: 0 0 auto;
+}
+.speed-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* colour modifiers — usable standalone or combined with .small-btn */
+.primary-btn { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+.ghost-btn { background: transparent; border-color: var(--border); color: var(--text-dim); box-shadow: none; }
+
+.update-btn { border-color: var(--good); color: var(--good); background: var(--surface-2); animation: update-glow 2.4s ease-in-out infinite; }
+
+.big-btn.release {
+  background: var(--release-bg);
+  border-color: var(--release-border);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--danger-soft), 0 6px 22px var(--danger-soft);
+  animation: release-glow 2.2s ease-in-out infinite;
+}
+
+.pulse { animation: pulse 1.6s infinite; }
+
+@keyframes pulse { 50% { box-shadow: 0 0 26px var(--accent-glow); } }
+@keyframes release-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--danger-soft), 0 6px 18px var(--danger-soft); }
+  50% { box-shadow: 0 0 0 1px var(--danger-glow), 0 6px 30px var(--danger-glow); }
+}
+@keyframes update-glow { 50% { opacity: 0.7; } }
+
+.big-btn:not(:disabled):active,
+.small-btn:not(:disabled):active,
+.tool-btn:not(:disabled):active,
+.speed-btn:not(:disabled):active,
+.level-card:not(:disabled):active { transform: scale(0.96); }
+
+.big-btn:disabled, .small-btn:disabled, .tool-btn:disabled, .speed-btn:disabled, .level-card:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+
+.big-btn:focus-visible, .small-btn:focus-visible, .tool-btn:focus-visible,
+.speed-btn:focus-visible, .level-card:focus-visible, .mat-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ==================== SCREENS — SHARED ==================== */
 .screen {
   position: absolute;
   inset: 0;
@@ -34,76 +185,466 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(8, 16, 24, 0.88);
+  background: var(--scrim-screen);
   text-align: center;
-  padding: 20px;
-  z-index: 10;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) calc(20px + env(safe-area-inset-right, 0px))
+            calc(20px + env(safe-area-inset-bottom, 0px)) calc(20px + env(safe-area-inset-left, 0px));
+  z-index: 10; /* above #hud (z-index 5) */
+  overflow-y: auto; /* safety net on very short viewports; #screen-levels re-locks this below */
+  -webkit-overflow-scrolling: touch;
 }
 
-.logo h1 { font-size: clamp(40px, 9vw, 84px); letter-spacing: 0.06em; }
-.logo .accent { color: #35a7ff; }
-.logo-rule { height: 3px; background: #35a7ff; margin: 6px auto 10px; width: 60%; }
-.tagline { opacity: 0.8; }
-.hint { opacity: 0.55; font-size: 13px; margin-top: 12px; }
-.version-tag { position: absolute; bottom: 10px; right: 14px; opacity: 0.4; font-size: 12px; }
+.screen-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.screen-head h2 { font-size: clamp(20px, 5.5vw, 26px); letter-spacing: 0.06em; }
 
-.big-btn, .small-btn, .tool-btn, .speed-btn {
-  font: inherit;
-  color: inherit;
-  background: #16344a;
-  border: 1px solid #35a7ff66;
-  border-radius: 10px;
-  cursor: pointer;
-  min-height: 44px;
+.tagline { color: var(--text-dim); font-size: clamp(13px, 3.6vw, 15px); }
+.hint { color: var(--text-faint); font-size: 13px; margin-top: 4px; }
+.version-tag { position: absolute; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); right: calc(14px + env(safe-area-inset-right, 0px)); color: var(--text-faint); font-size: 11px; }
+
+/* ---- title screen ---- */
+.logo h1 { font-size: clamp(40px, 11vw, 84px); letter-spacing: 0.06em; line-height: 1; }
+.logo .accent { color: var(--accent); }
+.logo-rule { height: 3px; background: var(--accent); margin: 8px auto 12px; width: 60%; max-width: 220px; border-radius: 2px; }
+
+/* decorative "water" band behind the title content — three animated layers */
+#title-water {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: clamp(70px, 22vh, 160px);
+  overflow: hidden;
+  z-index: -1; /* paints behind .screen's flex-item content (see stacking note below) */
+  pointer-events: none;
 }
-.big-btn { font-size: 20px; padding: 14px 34px; }
-.small-btn { font-size: 15px; padding: 10px 22px; }
-.big-btn:active, .small-btn:active { transform: scale(0.97); }
-.big-btn.release { background: #7a2f18; border-color: #ff9b35aa; }
-.pulse { animation: pulse 1.6s infinite; }
-@keyframes pulse { 50% { box-shadow: 0 0 22px #35a7ff88; } }
+/* Negative z-index here is deliberate: .screen is a flex container, and flex
+   items normally paint in DOM/z-index order regardless of `position`. Giving
+   #title-water z:-1 forces it behind the (auto/0 z-index) logo + buttons that
+   follow it in the markup, without needing to touch the HTML structure. */
+#title-water span {
+  position: absolute;
+  left: 0; bottom: 0;
+  width: 220%;
+  background-repeat: repeat-x;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+#title-water span:nth-child(1) {
+  height: 100%; opacity: 0.28;
+  background-image: repeating-linear-gradient(100deg, var(--accent-soft) 0 24px, transparent 24px 60px);
+  background-color: var(--accent-dim);
+  animation-name: water-drift; animation-duration: 22s;
+}
+#title-water span:nth-child(2) {
+  height: 68%; opacity: 0.4;
+  background-image: repeating-linear-gradient(96deg, var(--accent-soft) 0 18px, transparent 18px 46px);
+  animation-name: water-drift-rev; animation-duration: 15s;
+}
+#title-water span:nth-child(3) {
+  height: 40%; opacity: 0.6;
+  background-image: repeating-linear-gradient(104deg, var(--accent) 0 8px, transparent 8px 30px);
+  animation-name: water-drift; animation-duration: 9s;
+}
+@keyframes water-drift { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes water-drift-rev { from { transform: translateX(-50%); } to { transform: translateX(0); } }
 
-/* HUD */
+/* ---- levels screen ---- */
+#screen-levels { overflow-y: hidden; align-items: stretch; } /* the screen itself must never scroll away BACK — only the grid does */
+/* align-items:stretch (above) is only there so #level-grid can flex-grow to
+   fill the space between header and BACK — pull the header text and the
+   BACK button back to a natural centred width instead of stretching them */
+#screen-levels > .screen-head { align-self: center; }
+#btn-levels-back { align-self: center; }
+#levels-progress { margin-bottom: 2px; }
+
+#level-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: min(100%, 900px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 4px 2px 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.level-card {
+  display: flex;
+  flex-wrap: wrap; /* level-sub drops to its own full-width row when the name/badge/best don't leave room */
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  min-height: 60px;
+  position: relative;
+}
+.level-num {
+  font-size: clamp(22px, 6vw, 28px);
+  font-weight: 800;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.4em;
+  text-align: center;
+  flex: 0 0 auto;
+}
+.level-name { font-size: clamp(14px, 3.8vw, 16px); font-weight: 700; flex: 1 1 auto; min-width: 0; }
+.level-sub { font-size: clamp(11px, 3.2vw, 13px); color: var(--text-dim); flex-basis: 100%; margin-left: calc(1.4em + 12px); }
+.level-best { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+.badge.countdown { background: var(--warn-soft); color: var(--warn); }
+.badge.freebuild { background: var(--accent-soft); color: var(--accent); }
+.badge.sandbox { background: var(--sandbox-soft); color: var(--sandbox); }
+
+.level-card.done { border-left: 4px solid var(--good); background: linear-gradient(90deg, var(--good-soft), var(--surface-2) 18%); }
+.level-card.locked, .level-card:disabled {
+  background: var(--surface);
+  color: var(--text-faint);
+  box-shadow: none;
+}
+.level-card.locked .level-name, .level-card:disabled .level-name { color: var(--text-faint); }
+.level-card.locked::after, .level-card:disabled::after {
+  content: '🔒';
+  position: absolute;
+  top: 10px; right: 12px;
+  font-size: 14px;
+  opacity: 0.6;
+}
+
+/* ---- result screen ---- */
+.end-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 26px 28px;
+  max-width: 92vw;
+  width: min(440px, 92vw);
+  box-shadow: var(--shadow);
+}
+#result-heading { font-size: clamp(22px, 6vw, 30px); letter-spacing: 0.03em; margin-bottom: 4px; }
+#result-heading.win { color: var(--good); }
+#result-heading.fail { color: var(--danger); }
+#result-cause { color: var(--warn); }
+.result-note { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
+
+.end-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px 20px;
+  text-align: left;
+  margin: 18px 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.stat-k { font-size: 12px; color: var(--text-dim); letter-spacing: 0.03em; align-self: center; }
+.stat-v { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.stat-v.good { color: var(--good); }
+.stat-v.bad { color: var(--danger); }
+.stat-v.warn { color: var(--warn); }
+
+.result-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+
+/* ==================== HUD — TOP BAR & METERS ==================== */
 #hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
-#hud button { pointer-events: auto; }
+/* only real controls opt back in to receiving input — everything else lets
+   pointer events fall through to the canvas underneath */
+#hud button, #toolbar, #sim-controls, .tut-card { pointer-events: auto; }
+
 #hud-top {
   position: absolute;
-  top: env(safe-area-inset-top, 0);
+  top: env(safe-area-inset-top, 0px);
   left: 0; right: 0;
   display: flex;
+  flex-wrap: nowrap; /* keep this a single predictable row so other HUD elements can be positioned relative to it */
+  align-items: flex-start;
   justify-content: space-between;
-  padding: 10px 14px;
-  gap: 12px;
+  gap: clamp(6px, 2.5vw, 16px);
+  padding: 10px clamp(10px, 3vw, 16px);
 }
-.hud-label { display: block; font-size: 10px; opacity: 0.6; letter-spacing: 0.12em; }
-#toolbar {
+
+.hud-label { display: block; font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+
+#hud-level { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; max-width: 44%; }
+#hud-level-name { font-size: clamp(13px, 3.8vw, 16px); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hud-objective { font-size: clamp(10px, 2.8vw, 12px); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#objective-meter { width: 100%; max-width: 160px; margin-top: 2px; }
+
+#hud-timer { display: flex; flex-direction: column; align-items: center; text-align: center; flex: 0 0 auto; }
+#timer-text { font-size: clamp(20px, 6.5vw, 30px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+#hud-timer.urgent #timer-text, #hud-timer.urgent .hud-label { color: var(--danger); }
+#hud-timer.urgent { animation: timer-urgent 0.8s ease-in-out infinite; }
+@keyframes timer-urgent { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+#hud-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 0; flex: 0 1 auto; max-width: 52%; }
+#hud-budget { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; width: 100%; }
+#budget-left { font-size: clamp(14px, 3.8vw, 17px); font-weight: 700; font-variant-numeric: tabular-nums; }
+#budget-meter { width: 100%; max-width: 150px; }
+
+/* Readouts must NEVER shrink below their text: a 3-digit load like 248% in a
+   flex-shrunk box overflows its own bounds and prints on top of the neighbour
+   (they don't wrap — there is no break opportunity inside "248%"). flex:0 0 auto
+   + nowrap keeps each column exactly as wide as its content. */
+/* Inset past #btn-hud-menu's corner (it sits at top:68px, exactly this row's
+   height) and wrap instead of running off the screen edge when space is short. */
+#hud-readouts { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; padding-right: 56px; }
+.readout { display: flex; flex-direction: column; align-items: flex-end; flex: 0 0 auto; }
+.readout > span { white-space: nowrap; }
+.readout > span:first-child { font-size: clamp(12px, 3.2vw, 14px); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* thin horizontal bars; JS sets the fill's width via inline style */
+.meter { position: relative; width: 120px; max-width: 36vw; height: 6px; border-radius: 4px; background: var(--border); overflow: hidden; flex: 0 0 auto; }
+.meter > i { display: block; height: 100%; width: 0%; border-radius: 4px; transition: width 0.25s ease; }
+#budget-fill { background: linear-gradient(90deg, var(--accent-dim), var(--accent)); }
+#objective-fill { background: linear-gradient(90deg, var(--accent), var(--good)); }
+
+/* live states hud.js toggles: budget nearly gone, objective slipping, dam
+   overloaded. Never colour alone — the number itself is the primary signal. */
+#hud-budget.low #budget-left { color: var(--warn); }
+#hud-budget.low #budget-fill { background: linear-gradient(90deg, var(--warn), var(--danger)); }
+#objective-meter.bad > i { background: linear-gradient(90deg, var(--warn), var(--danger)); }
+#stat-load.warn { color: var(--warn); }
+#stat-load.bad { color: var(--danger); }
+
+/* toast: centred near top-middle, purely informational, never blocks input */
+#hud-toast {
   position: absolute;
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-  left: 10px;
-  display: flex;
-  gap: 8px;
-  pointer-events: auto;
-}
-#material-bar { display: flex; gap: 8px; }
-#sim-controls {
-  position: absolute;
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 6px;
-  pointer-events: auto;
+  pointer-events: none;
+  z-index: 1;
 }
-.tool-btn, .speed-btn { min-width: 44px; font-size: 16px; }
-.speed-btn.active { background: #35a7ff44; }
+.toast {
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: clamp(13px, 3.6vw, 15px);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  animation: toast-in-out 1.6s ease forwards;
+}
+.toast.win { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+.toast.fail { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+.toast.info { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+@keyframes toast-in-out {
+  0% { opacity: 0; transform: translateY(6px); }
+  12%, 78% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-10px); }
+}
+
+/* ==================== HUD — TOOLBAR & MATERIALS ==================== */
+/* The bottom-left build toolbar. On a 360px phone it cannot fit four rich
+   material buttons + four tool icons side by side and still leave room for
+   the release button — so it scrolls horizontally instead of stacking or
+   shrinking below the 44px touch minimum. */
+#toolbar {
+  position: absolute;
+  left: env(safe-area-inset-left, 0px);
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  /* reserve room for RELEASE WATER (~200px incl. margin) so the strip never
+     slides underneath it on phones — it scrolls instead */
+  max-width: calc(100vw - 212px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  /* The inset lives in PADDING, not in `left`. An overflow container clips at
+     its padding box, so a child flush against the edge (and its focus ring /
+     active glow) gets cut off — which is what clipped the first material
+     label. Padding keeps the first and last buttons clear of the clip edge,
+     and scroll-padding keeps them clear when the strip is scrolled too. */
+  padding: 4px 10px;
+  scroll-padding-inline: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+#toolbar::-webkit-scrollbar { display: none; }
+
+#material-bar { display: flex; gap: 6px; flex: 0 0 auto; }
+#tool-group { display: flex; gap: 6px; flex: 0 0 auto; padding-left: 8px; border-left: 1px solid var(--border); }
+
+/* material buttons — built by hud.js as .tool-btn.mat-btn with swatch/name/cost/key children */
+.mat-btn {
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  position: relative;
+}
+.mat-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  display: block;
+  border: 1px solid var(--scrim);
+  transition: transform 0.15s ease;
+}
+/* fallback/backup fill so the swatch reads correctly even a frame before
+   hud.js sets its inline background colour — inline styles still win once set */
+.mat-btn[data-mat="timber"] .mat-swatch { background: var(--mat-timber); }
+.mat-btn[data-mat="steel"] .mat-swatch { background: var(--mat-steel); }
+.mat-btn[data-mat="concrete"] .mat-swatch { background: var(--mat-concrete); }
+.mat-btn[data-mat="cable"] .mat-swatch { background: var(--mat-cable); }
+.mat-name { font-size: clamp(9px, 2.6vw, 11px); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
+.mat-cost { font-size: clamp(8px, 2.2vw, 10px); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.mat-key {
+  position: absolute;
+  top: 3px; right: 4px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-faint);
+  background: var(--scrim);
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+@media (hover: none) { .mat-key { display: none; } } /* hotkeys are meaningless on a touch-only device */
+
+.mat-btn.active {
+  border-color: var(--accent);
+  background: var(--surface-3);
+  box-shadow: 0 0 0 1px var(--accent-soft) inset, 0 0 14px var(--accent-glow);
+}
+.mat-btn.active .mat-swatch { transform: scale(1.3); }
+.mat-btn.unaffordable { opacity: 0.42; }
+
+/* ==================== HUD — SIM CONTROLS, RELEASE, MENU ==================== */
+#sim-controls {
+  position: absolute;
+  left: 50%;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+#sim-controls::-webkit-scrollbar { display: none; }
+
 #btn-release {
   position: absolute;
+  right: calc(12px + env(safe-area-inset-right, 0px));
   bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  right: 12px;
+  font-size: clamp(13px, 3.6vw, 18px);
+  padding: clamp(10px, 2.8vw, 16px) clamp(14px, 4vw, 26px);
+  z-index: 2;
 }
-#btn-hud-menu { position: absolute; top: 56px; right: 12px; }
 
-#level-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; width: min(720px, 92vw); }
-.end-card { background: #10222f; border: 1px solid #35a7ff44; border-radius: 14px; padding: 26px 30px; max-width: 92vw; }
-.end-stats { display: grid; grid-template-columns: auto auto; gap: 6px 22px; text-align: left; margin: 16px 0; }
-.result-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+/* menu/levels button lives in its own top-right column, clear of #hud-top
+   (reserves ~68px under the safe-area-adjusted top bar — see report for the
+   full vertical budget) */
+#btn-hud-menu {
+  position: absolute;
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  top: calc(env(safe-area-inset-top, 0px) + 68px);
+}
+
+/* build hint: a correction ("over budget") or a calm level hint — sits just
+   above the toolbar, centred, never mistakable for a button */
+#build-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  max-width: min(340px, 86vw);
+  text-align: center;
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: clamp(11px, 3.2vw, 13px);
+  font-weight: 600;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+#build-hint.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+#build-hint.info { color: var(--text-dim); border-color: var(--border); background: var(--surface); }
+
+/* ==================== TUTORIAL ==================== */
+/* Wrapper spans the whole screen so the card can bottom-anchor itself, but
+   only the card opts in to pointer events — the tutorial must never block
+   the player from dragging on the canvas beneath it. */
+#tutorial {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 16px calc(100px + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+.tut-card {
+  width: min(420px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+  animation: tut-in 0.3s ease;
+}
+.tut-step { display: block; font-size: 10px; letter-spacing: 0.12em; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
+#tut-title { font-size: clamp(15px, 4vw, 18px); margin-bottom: 4px; }
+#tut-text { font-size: clamp(12px, 3.4vw, 14px); color: var(--text-dim); line-height: 1.4; }
+.tut-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.tut-dots { display: flex; gap: 5px; flex: 1 1 auto; }
+.tut-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); display: block; }
+.tut-dots span.on { background: var(--accent); }
+@keyframes tut-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ==================== RESPONSIVE (≥720px) ==================== */
+@media (min-width: 720px) {
+  #level-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: 60vh; }
+  .level-sub { flex-basis: auto; margin-left: 0; }
+
+  /* plenty of room at this width — let the toolbar and sim row breathe
+     instead of scrolling */
+  #toolbar { max-width: calc(100vw - 220px); }
+  #sim-controls { max-width: calc(100vw - 40px); }
+
+  .big-btn { padding: 16px 40px; }
+  .end-card { padding: 32px 40px; }
+}
+
+@media (hover: hover) {
+  .big-btn:hover, .small-btn:hover, .tool-btn:hover, .speed-btn:hover, .mat-btn:hover {
+    background: var(--surface-3);
+    border-color: var(--accent);
+  }
+  .big-btn.release:hover { background: var(--release-bg-hot); }
+  .primary-btn:hover { background: var(--accent); filter: brightness(1.1); }
+  .ghost-btn:hover { background: var(--surface-2); color: var(--text); }
+  .level-card:not(:disabled):hover { border-color: var(--accent); transform: translateY(-1px); }
+  .level-card.locked:hover, .level-card:disabled:hover { border-color: var(--border-strong); transform: none; }
+}
+
+/* ==================== REDUCED MOTION ==================== */
+@media (prefers-reduced-motion: reduce) {
+  .pulse, .big-btn.release, #hud-timer.urgent, .toast, #title-water span, .update-btn {
+    animation: none !important;
+  }
+  .toast { opacity: 1; transform: none; }
+  .tut-card { animation: none; }
+  * { scroll-behavior: auto !important; }
+}

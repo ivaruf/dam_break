@@ -54,9 +54,11 @@ const server = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '1
 const profile = mkdtempSync(path.join(tmpdir(), 'dam-builder-qa-'));
 process.on('exit', () => { try { rmSync(profile, { recursive: true, force: true }); } catch {} });
 
+const WIDTH = parseInt(opt('width', '1280'), 10);
+const HEIGHT = parseInt(opt('height', '800'), 10);
 const chrome = spawn(CHROME, [
   '--headless=new', '--remote-debugging-port=0', '--no-first-run',
-  `--user-data-dir=${profile}`, '--window-size=1280,800',
+  `--user-data-dir=${profile}`, `--window-size=${WIDTH},${HEIGHT}`,
   '--hide-scrollbars', '--disable-gpu', 'about:blank',
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
 

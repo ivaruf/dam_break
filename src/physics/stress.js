@@ -69,6 +69,7 @@ export function updateStress(structure, dt, time) {
 
 function breakMember(structure, m, time, out) {
   m.broken = true;
+  const load = m.load;                    // severity, before we zero it below
   m.load = 0;
   structure.brokenCount++;
   structure.obstructionsDirty = true;     // the water profile changes next tick
@@ -82,5 +83,5 @@ function breakMember(structure, m, time, out) {
 
   spawnDebris(structure, m);
   out.push(m);
-  emit('member:break', { id: m.id, x, y, mode, matId: m.mat.id });
+  emit('member:break', { id: m.id, x, y, mode, matId: m.mat.id, load });
 }

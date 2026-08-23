@@ -19,15 +19,40 @@
   <!-- HUD (build + sim). ui/hud.js owns behavior; OPUS C owns markup below. -->
   <div id="hud" class="hidden">
     <div id="hud-top">
-      <div id="hud-level"><span id="hud-level-name"></span><span id="hud-objective"></span></div>
-      <div id="hud-budget"><span id="budget-left"></span><span class="hud-label">BUDGET</span></div>
-      <div id="hud-timer" class="hidden"><span id="timer-text"></span><span class="hud-label">FLOOD</span></div>
+      <div id="hud-level">
+        <span id="hud-level-name"></span>
+        <span id="hud-objective"></span>
+        <div id="objective-meter" class="meter hidden"><i id="objective-fill"></i></div>
+      </div>
+
+      <div id="hud-timer" class="hidden">
+        <span id="timer-text"></span>
+        <span class="hud-label">FLOOD ARRIVES</span>
+      </div>
+
+      <div id="hud-right">
+        <div id="hud-budget">
+          <span id="budget-left"></span>
+          <span class="hud-label">LEFT OF <span id="budget-total"></span></span>
+          <div id="budget-meter" class="meter"><i id="budget-fill"></i></div>
+        </div>
+        <div id="hud-readouts" class="hidden">
+          <div class="readout"><span id="stat-load">—</span><span class="hud-label">PEAK LOAD</span></div>
+          <div class="readout"><span id="stat-retained">—</span><span class="hud-label">HELD</span></div>
+        </div>
+      </div>
     </div>
+
+    <div id="hud-toast" aria-live="polite"></div>
 
     <div id="toolbar">
       <div id="material-bar"></div>
-      <button id="btn-erase" class="tool-btn" type="button" title="Erase (E)">⌫</button>
-      <button id="btn-undo" class="tool-btn" type="button" title="Undo (Z)">↶</button>
+      <div id="tool-group">
+        <button id="btn-erase" class="tool-btn" type="button" title="Erase (E)">⌫</button>
+        <button id="btn-undo" class="tool-btn" type="button" title="Undo (Z)">↶</button>
+        <button id="btn-redo" class="tool-btn" type="button" title="Redo (Y)">↷</button>
+        <button id="btn-clear" class="tool-btn" type="button" title="Clear the whole dam">🗑</button>
+      </div>
     </div>
 
     <div id="sim-controls" class="hidden">
@@ -43,10 +68,25 @@
     <button id="btn-release" class="big-btn release hidden" type="button">⚠ RELEASE WATER</button>
     <button id="btn-hud-menu" class="tool-btn" type="button" title="Levels (Esc)">☰</button>
     <div id="build-hint" class="hidden"></div>
+
+    <!-- First-level tutorial. Bottom card on purpose: it must never block the build area. -->
+    <div id="tutorial" class="hidden">
+      <div class="tut-card">
+        <span id="tut-step" class="tut-step"></span>
+        <h3 id="tut-title"></h3>
+        <p id="tut-text"></p>
+        <div class="tut-foot">
+          <div id="tut-dots" class="tut-dots"></div>
+          <button class="small-btn ghost-btn" id="btn-tut-skip" type="button">SKIP</button>
+          <button class="small-btn primary-btn" id="btn-tut-next" type="button">GOT IT →</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Screens. OPUS C owns markup + screens.js behavior. -->
   <div id="screen-title" class="screen">
+    <div id="title-water" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="logo">
       <h1>DAM<span class="accent">BUILDER</span></h1>
       <div class="logo-rule"></div>
@@ -60,7 +100,10 @@
   </div>
 
   <div id="screen-levels" class="screen hidden">
-    <h2>SELECT LEVEL</h2>
+    <div class="screen-head">
+      <h2>SELECT LEVEL</h2>
+      <p id="levels-progress" class="tagline"></p>
+    </div>
     <div id="level-grid"></div>
     <button class="small-btn" id="btn-levels-back" type="button">BACK</button>
   </div>
@@ -69,6 +112,7 @@
     <div class="end-card">
       <h2 id="result-heading">DAM TEST COMPLETE</h2>
       <p id="result-cause" class="tagline hidden"></p>
+      <p id="result-note" class="result-note hidden"></p>
       <div id="result-stats" class="end-stats"></div>
       <div class="result-btns">
         <button class="big-btn" id="btn-result-retry" type="button">↻ RETRY</button>

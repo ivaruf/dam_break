@@ -49,6 +49,7 @@ function makeNode(id, x, y, anchored) {
     mass: CONFIG.physics.nodeBaseMass,
     anchored, ax: x, ay: y,
     fx: 0, fy: 0,              // EXTERNAL accumulator (water writes, solver clears)
+    lfx: 0, lfy: 0,            // last tick's fx/fy, kept for the F2 force arrows
     onGround: false,
     contact: false,            // ground contact armed this substep
     groundY: 0, groundNx: 0, groundNy: 1,
@@ -177,6 +178,7 @@ function debrisNode(from, mass, area) {
     mass,
     anchored: false, ax: from.x, ay: from.y,
     fx: 0, fy: 0,
+    lfx: 0, lfy: 0,
     onGround: false,
     contact: false,
     groundY: 0, groundNx: 0, groundNy: 1,

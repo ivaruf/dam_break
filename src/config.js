@@ -185,7 +185,6 @@ export const CONFIG = {
     stratumStep: 3.5,                   // m between subsurface strata lines
     gridStep: 5,                        // m, faint build-phase world grid
     gridColor: 'rgba(130, 180, 215, 0.07)',
-    waterlineColor: 'rgba(120, 200, 255, 0.10)',
 
     // anchors + build zone
     anchorColor: '#ffd35a',
@@ -214,6 +213,7 @@ export const CONFIG = {
     propRockR: 0.9,
     propHouseH: 2.6,
     propSignH: 1.8,
+    propMinZoom: 3,                     // px/m below which props stop drawing
 
     // structure + stress
     memberMinPx: 2.2,
@@ -228,6 +228,8 @@ export const CONFIG = {
     crackTicksMax: 5,
     crackLenPx: 5,
     bowMax: 0.16,                       // m sagitta at load 1.0 (compression)
+    cableSlackMin: 0.01,                // m of slack before a cable visibly hangs
+    cableSagScale: 0.35,                // fraction of the geometric slack drawn as sag
     brokenColor: '#3b4147',
     debrisAlpha: 0.9,
     nodeColor: '#e8f2fa',
@@ -285,14 +287,26 @@ export const CONFIG = {
     jetHold: 0.35,                      // s a breach/overtop keeps spraying after last event
     shakeDecay: 7,                      // exponential decay per second
     shakeBreak: 3.4,                    // px impulse for a big break
-    shakeBigLoad: 1.3,                  // load above which a break counts as "big"
+    shakeBigLoad: 1.6,                  // break load that earns a full-severity jolt
+                                        // (matches damage.hardBreak)
     shakeMassRef: 40,                   // kg of broken piece that earns a full-strength shake
     shakeImpactRef: 900,                // water:impact magnitude for a full-strength shake
+
+    // F2 debug overlay (ui/debug.js)
+    dbgFontPx: 11,
+    dbgColor: '#7dffa0',
+    dbgDim: 'rgba(125, 255, 160, 0.45)',
+    dbgWarn: '#ffd35a',
+    dbgBad: '#ff5a3c',
+    dbgBg: 'rgba(4, 10, 14, 0.72)',
+    dbgVecScale: 0.35,                  // m of arrow per (m/s) of velocity
+    dbgArrowEvery: 6,                   // draw a water velocity arrow every N boundaries
+    dbgMinMemberPx: 34,                 // screen length before a load % label is drawn
+    dbgBlockedPx: 3,                    // width of a blocked-interval bar
 
     // hud / screens
     timerUrgent: 10,                    // s remaining where the timer goes urgent
     toastMs: 1600,
-    hintMs: 2600,
     stressBarWarn: 0.8,
   },
 
