@@ -9,7 +9,7 @@ import {
   buildScene, createRecorder, runSim, createSuite,
   avgLoad, memberById,
 } from './harness.js';
-import { volumeBetween, velAt, totalVolume } from '../src/physics/water.js';
+import { volumeBetween, velAt, depthAt, totalVolume } from '../src/physics/water.js';
 import { LEVELS } from '../src/levels/levels.js';
 import { CONFIG } from '../src/config.js';
 
@@ -22,11 +22,30 @@ const A = {
   scene7Downstream: 0.2,   // m^2 downstream volume growth required past t=5s
   scene8Spread: 0.5,       // s minimum time between first and last break (progressive, not instant)
 
-  // foundations (unanchored gravity dam)
+  // foundations (unanchored gravity dam). The crest stays ABOVE both water
+  // levels: once the water pours over the top it floods the downstream side and
+  // (correctly, now that the water actually goes there) stops shoving.
+  foundHeight: 9,          // m of unanchored dam
+  foundWidth: 1.2,         // m base width: water force grows as H², dead weight
+                           // only as H·W, so a squat block simply never loses —
+                           // the interesting dam is the slender one
   foundStandDepth: 3,      // m of water the dam must hold without moving
-  foundSlideDepth: 7,      // m of water that must shove it
+  foundSlideDepth: 8,      // m of water that must shove it
   foundStandMax: 0.05,     // m of drift still counted as "did not move"
   foundSlideMin: 1.0,      // m of base travel that counts as sliding
+
+  // --- water v2 (PIC/FLIP) gates ---
+  hydroTol: 0.3,           // fraction of ½rho g H² the measured wall load may miss by
+  hydroQuartile: 3,        // bottom-quartile load / top-quartile load
+  calmSurface: 0.4,        // m; max deviation of a settled reservoir's surface
+  calmSpeed: 1.2,          // m/s; fastest particle in a settled reservoir
+  calmLoadVar: 0.1,        // peak-to-peak wall load over 1 s, as a fraction of mean
+  sealSeconds: 30,         // s a sealed wall must hold with ZERO particles through
+  sealMargin: 1.0,         // m past the wall face that counts as "got through"
+  impactRatio: 2.5,        // dam-break peak load / its own static follow-on
+  jetFlowMin: 0.2,         // m²/s of measured flux through a hole that reads as a jet
+  perfParticles: 3500,     // the perf scene must actually carry this many particles
+  perfBudget: 6.0,         // ms/tick allowed for 4000 particles + 250 members
 
   // cables
   cableHangMinY: 0.5,      // m; a suspended load must stay off the ground
@@ -286,38 +305,202 @@ function determinism() {
   // the WEAK variant is the meaningful one here: it actually breaks members, so
   // brokenCount and firstFailure.time have something to be identical about
   const t = createSuite('determinism -- scene 4 (weak) run twice from scratch');
-  function run() {
+  function run(seconds) {
     const spec = testLevel(4, { variant: 'weak' });
     const ctx = buildScene(spec);
     const rec = createRecorder();
-    runSim(ctx, 15, { recorder: rec });
+    runSim(ctx, seconds, { recorder: rec });
     rec.stop();
     const { x0, x1 } = spec.water.initial[0];
     return {
       brokenCount: ctx.structure.brokenCount,
       firstFailure: ctx.structure.firstFailure,
       upstreamVol: volumeBetween(ctx.water, x0, x1),
+      water: ctx.water,
     };
   }
-  const r1 = run();
-  const r2 = run();
+  const r1 = run(15);
+  const r2 = run(15);
   t.eq(r1.brokenCount, r2.brokenCount, 'brokenCount identical across runs');
   const ft1 = r1.firstFailure ? r1.firstFailure.time : null;
   const ft2 = r2.firstFailure ? r2.firstFailure.time : null;
   t.eq(ft1, ft2, 'firstFailure time identical across runs (exact)');
   t.near(r1.upstreamVol, r2.upstreamVol, 1e-9, 'upstream volume identical across runs (1e-9)');
+
+  // v2: the particles themselves must match bit-for-bit, not just the summaries
+  t.eq(r1.water.pcount, r2.water.pcount, 'particle count identical across runs');
+  let diff = 0;
+  for (let i = 0; i < r1.water.pcount; i++) {
+    const dx = Math.abs(r1.water.ppx[i] - r2.water.ppx[i]);
+    const dy = Math.abs(r1.water.ppy[i] - r2.water.ppy[i]);
+    if (dx > diff) diff = dx;
+    if (dy > diff) diff = dy;
+  }
+  t.eq(diff, 0, 'every particle position identical after 15 s (exact, not near)');
+  return printSuite(t);
+}
+
+// ---- water v2 (PIC/FLIP) gates -------------------------------------------
+
+// Total horizontal water load the structure received on the last tick. lfx is
+// the copy constraints.js keeps of the external accumulator, so this is exactly
+// what the solver consumed — anchored nodes included.
+function wallLoad(structure, yLo, yHi) {
+  let sum = 0;
+  for (const n of structure.nodes) {
+    if (yLo !== undefined && (n.y < yLo || n.y >= yHi)) continue;
+    sum += n.lfx;
+  }
+  return sum;
+}
+
+function maxParticleSpeed(water) {
+  let v = 0;
+  for (let i = 0; i < water.pcount; i++) {
+    const s = Math.hypot(water.pvx[i], water.pvy[i]);
+    if (s > v) v = s;
+  }
+  return v;
+}
+
+// The load a real reservoir puts on a real dam: total force within ±30% of the
+// analytic ½rho g H², concentrated at the base, steady, and not one particle
+// through the wall in 30 s.
+function hydrostatics() {
+  const t = createSuite('hydrostatics -- analytic wall load, base concentration, sealing, calm');
+  const surface = 8, wallX = 24, wallH = 11;
+  const wall = buildWall({
+    x: wallX, base: 0, height: wallH, width: 1.5, mat: 'concrete',
+    spacing: 1, braced: true, idPrefix: 'hy',
+  });
+  const ctx = buildScene({
+    terrain: [[0, 0], [60, 0]], anchors: wall.anchorPoints,
+    testDesign: { nodes: wall.nodes, members: wall.members },
+    water: { initial: [{ x0: 0, x1: wallX - 1, surface }] },
+  });
+
+  let leaked = 0;
+  let vmax = 0;
+  const loads = [];
+  runSim(ctx, A.sealSeconds, {
+    onTick: (time) => {
+      for (let i = 0; i < ctx.water.pcount; i++) {
+        if (ctx.water.ppx[i] > wallX + A.sealMargin) leaked++;
+      }
+      if (time > A.sealSeconds - 1) {
+        loads.push(wallLoad(ctx.structure));
+        const s = maxParticleSpeed(ctx.water);
+        if (s > vmax) vmax = s;
+      }
+    },
+  });
+
+  t.eq(leaked, 0, `ZERO particle-ticks past the sealed wall in ${A.sealSeconds}s`);
+  t.eq(ctx.structure.brokenCount, 0, 'the concrete wall holds');
+
+  // measured head clear of the dam's own footprint, and the analytic force it implies
+  const H = depthAt(ctx.water, wallX - 2.2);
+  const scale = CONFIG.coupling.pressureScale * CONFIG.coupling.density;
+  const analytic = 0.5 * scale * CONFIG.water.g * H * H;
+  const total = loads.reduce((s, v) => s + v, 0) / loads.length;
+  t.ok(Math.abs(total - analytic) <= analytic * A.hydroTol,
+    `total wall load within ±${A.hydroTol * 100}% of ½rho g H² (H=${H.toFixed(2)}m)`,
+    `${total.toFixed(0)} vs ${analytic.toFixed(0)} (${((total / analytic - 1) * 100).toFixed(1)}%)`);
+
+  // Vertical distribution straight off the pressure field: each member's own
+  // share, banded by where the water actually pushes on it.
+  const q = H / 4;
+  let bottom = 0, top = 0;
+  for (const cf of ctx.water.colliderForces) {
+    if (cf.y < q) bottom += cf.fx;
+    else if (cf.y > H - q && cf.y < H) top += cf.fx;
+  }
+  console.log(`  bottom quartile ${bottom.toFixed(1)}, top quartile ${top.toFixed(1)}`
+    + ` (physical, ×${CONFIG.coupling.pressureScale} in game newtons)`);
+  t.gt(bottom, A.hydroQuartile * top, `bottom-quartile load > ${A.hydroQuartile}x top-quartile load`);
+
+  // calm: flat surface, no popcorn, steady load
+  let sMin = Infinity, sMax = -Infinity;
+  const w = ctx.water;
+  // clear of both shores and of the dam's own footprint (the columns the dam
+  // capsule occupies hold less water simply because the dam is in them)
+  for (let i = Math.floor(6 / w.cellW); i < Math.floor((wallX - 3) / w.cellW); i++) {
+    const s = w.bed[i] + w.depth[i];
+    if (s < sMin) sMin = s;
+    if (s > sMax) sMax = s;
+  }
+  t.lt(sMax - sMin, A.calmSurface, 'settled reservoir surface is flat (m of spread)');
+  t.lt(vmax, A.calmSpeed, 'fastest particle in the settled reservoir (m/s)');
+  const lMin = Math.min(...loads), lMax = Math.max(...loads);
+  t.lt((lMax - lMin) / Math.abs(total), A.calmLoadVar,
+    'wall load peak-to-peak over the last second (fraction of mean)');
+  return printSuite(t);
+}
+
+// A dam-break front must hit harder than the same water standing still against
+// the same wall — the whole point of a momentum-carrying fluid.
+function impact() {
+  const t = createSuite('impact -- dam-break front vs its own static follow-on');
+  const wallX = 30;
+  const wall = buildWall({
+    x: wallX, base: 0, height: 12, width: 2, mat: 'concrete',
+    spacing: 1, braced: true, idPrefix: 'im',
+  });
+  const ctx = buildScene({
+    terrain: [[0, 0], [46, 0]], anchors: wall.anchorPoints,
+    testDesign: { nodes: wall.nodes, members: wall.members },
+    water: { initial: [{ x0: 0, x1: 14, surface: 8 }] },
+  });
+  let peak = 0, peakT = 0, statSum = 0, statN = 0;
+  runSim(ctx, 25, {
+    onTick: (time) => {
+      const f = wallLoad(ctx.structure);
+      if (f > peak) { peak = f; peakT = time; }
+      if (time > 20) { statSum += f; statN++; }
+    },
+  });
+  const stat = statSum / statN;
+  console.log(`  peak ${peak.toFixed(0)} at t=${peakT.toFixed(2)}s, static follow-on ${stat.toFixed(0)}`);
+  t.gt(peak, A.impactRatio * stat, `impact peak > ${A.impactRatio}x its own static follow-on`);
+  return printSuite(t);
+}
+
+// A hole must behave like a hole: measured flux through it, a faster drain, and
+// the water genuinely arriving downstream.
+function leakJet() {
+  const t = createSuite('leak -- hole in the dam makes a measurable jet');
+  const spec = testLevel(5, { variant: 'holed' });
+  const ctx = buildScene(spec);
+  const { damX, upstream, downstream } = spec.testMeta;
+  const b0 = Math.round((damX - 1 - ctx.water.x0) / ctx.water.cellW);
+  const b1 = Math.round((damX + 1 - ctx.water.x0) / ctx.water.cellW);
+  let maxGap = 0;
+  const up0 = volumeBetween(ctx.water, upstream[0], upstream[1]);
+  runSim(ctx, 20, {
+    onTick: () => {
+      for (let b = b0; b <= b1; b++) {
+        const g = Math.abs(ctx.water.gapFlow[b]);
+        if (g > maxGap) maxGap = g;
+      }
+    },
+  });
+  const up1 = volumeBetween(ctx.water, upstream[0], upstream[1]);
+  const down = volumeBetween(ctx.water, downstream[0], downstream[1]);
+  t.gt(maxGap, A.jetFlowMin, 'measured gap flux through the hole (m²/s)');
+  t.gt(up0 - up1, 1, 'the reservoir actually drained (m² lost upstream)');
+  t.gt(down, 1, 'the water arrived downstream (m²)');
   return printSuite(t);
 }
 
 // Foundations must matter: an UNANCHORED heavy gravity dam should stand on
-// friction alone, yet slide once the water shoves harder than mu*N. Squat and
-// wide so it slides rather than overturns (a tall thin one tips first, which is
-// also correct, just a different failure).
+// friction alone, yet give way once the water shoves harder than mu*N. Whether
+// the base then slides or the whole block tips is not the point (both are real
+// foundation failures) — the point is that the base MOVES.
 function foundations() {
   const t = createSuite('foundations -- unanchored gravity dam, weight vs sliding');
   function run(surface) {
     const wall = buildWall({
-      x: 24, base: 0, height: 4, width: 2.8, mat: 'concrete',
+      x: 24, base: 0, height: A.foundHeight, width: A.foundWidth, mat: 'concrete',
       spacing: 1, braced: true, anchorBase: false, idPrefix: 'g',
     });
     const ctx = buildScene({
@@ -451,7 +634,9 @@ function robustness() {
 }
 
 // Real-scale budget check: ~150 m of terrain at cellW 0.4 and a 200+ member dam.
+// The v2 gate is 4000 particles + 250 members inside 6 ms/tick.
 function performance() {
+  let pass = true;
   // three stacked bays of dense truss = 200+ members, on a 150 m level at
   // cellW 0.4 (~375 water cells): the worst case the game is meant to carry.
   const nodes = [];
@@ -472,6 +657,7 @@ function performance() {
     water: { initial: [{ x0: 0, x1: 66, surface: 10 }], flood: { x: 4, rate: 4, duration: 60, delay: 0 } },
   };
   const dt = CONFIG.physics.dt;
+  const t = createSuite('performance -- 4000 particles + 250 members inside budget');
   for (const label of ['scene 4 (strong)', 'full scale']) {
     const ctx = label === 'full scale' ? buildScene(spec) : buildScene(testLevel(4, { variant: 'strong' }));
     const steps = Math.round(10 / dt);
@@ -479,10 +665,20 @@ function performance() {
     runSim(ctx, 10);
     const ms = Number(process.hrtime.bigint() - start) / 1e6;
     const budget = (1000 / 60).toFixed(2);
-    console.log(`  ${label}: ${ctx.water.n} cells, ${ctx.structure.members.length} members,`
-      + ` ${ctx.structure.nodes.length} nodes -> ${(ms / steps).toFixed(4)} ms/tick`
-      + ` (${((ms / steps) / (1000 / 60) * 100).toFixed(1)}% of the ${budget}ms frame budget)`);
+    const per = ms / steps;
+    console.log(`  ${label}: ${ctx.water.n} cells, ${ctx.water.pcount} particles`
+      + ` (spacing ${ctx.water.fluid.spacing.toFixed(2)}m, grid ${ctx.water.fluid.nx}x${ctx.water.fluid.ny}),`
+      + ` ${ctx.structure.members.length} members, ${ctx.structure.nodes.length} nodes`
+      + ` -> ${per.toFixed(4)} ms/tick`
+      + ` (${(per / (1000 / 60) * 100).toFixed(1)}% of the ${budget}ms frame budget)`);
+    if (label === 'full scale') {
+      t.gt(ctx.water.pcount, A.perfParticles, 'the perf scene really is particle-heavy');
+      t.gt(ctx.structure.members.length, 240, 'the perf scene really is member-heavy');
+      t.lt(per, A.perfBudget, `full-scale cost per tick (ms) under the ${A.perfBudget}ms gate`);
+    }
   }
+  pass = printSuite(t) && pass;
+  return pass;
 }
 
 const runners = { 1: scene1, 2: scene2, 3: scene3, 4: scene4, 5: scene5, 6: scene6, 7: scene7, 8: scene8 };
@@ -511,6 +707,9 @@ for (let i = 1; i <= SCENE_COUNT; i++) {
 
 const extras = [
   ['ROBUSTNESS', robustness],
+  ['HYDROSTATICS', hydrostatics],
+  ['IMPACT', impact],
+  ['LEAK', leakJet],
   ['FOUNDATIONS', foundations],
   ['CABLES', cables],
   ['DEBRIS', debris],
@@ -540,14 +739,16 @@ try {
 console.log(`DETERMINISM: ${determinismPass ? 'PASS' : 'FAIL'}`);
 
 console.log('\n=== PERFORMANCE ===');
+let perfPass = false;
 try {
-  performance();
+  perfPass = performance();
 } catch (err) {
   console.log(`  performance check threw -- ${err && err.stack ? err.stack : err}`);
 }
 
 const wallMs = Date.now() - wallStart;
-const failures = (scenesRun - scenesPassed) + (determinismPass ? 0 : 1) + extrasFailed;
+const failures = (scenesRun - scenesPassed) + (determinismPass ? 0 : 1) + extrasFailed
+  + (only || perfPass ? 0 : 1);
 console.log(`\n${scenesPassed}/${scenesRun} scenes passed, ${extras.length - extrasFailed}/${only ? 0 : extras.length} extra checks passed,`
   + ` determinism ${determinismPass ? 'PASS' : 'FAIL'}, wall time ${wallMs}ms`);
 process.exit(failures ? 1 : 0);

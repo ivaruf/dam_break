@@ -36,21 +36,102 @@ export const CONFIG = {
     debrisDamping: 0.995,  // debris tumbles to rest a bit faster
   },
 
+  // v2: bulk water is the PIC/FLIP fluid (CONFIG.fluid). These keys drive the
+  // derived per-column arrays that the renderer/HUD/modes still read.
   water: {
-    cellW: 0.4,            // column width (m)
+    cellW: 0.4,            // derived-column width (m)
     g: 9.8,
-    damping: 0.998,        // per-tick velocity damping (a flood front must keep
-                           // its momentum long enough to actually travel)
-    maxVel: 18,            // clamp (m/s)
     minDepth: 0.005,       // below this a cell renders/acts as dry (m)
-    transferCap: 0.45,     // max fraction of a cell's water leaving per tick (stability)
-    orificeCoeff: 0.75,    // leak-through-gap discharge coefficient
-    weirCoeff: 0.6,        // overtopping discharge coefficient
+  },
 
-    // --- OPUS A ---------------------------------------------------------
-    substeps: 2,           // flow substeps per physics tick (CFL headroom)
-    sealEps: 0.03,         // m; a gap thinner than this counts as sealed
-    weirDrownExp: 0.385,   // Villemonte drowned-weir exponent
+  // --- OPUS A: PIC/FLIP particle fluid (water v2) -----------------------
+  // The water IS particles; the arrays in CONFIG.water above are now DERIVED
+  // per tick from particle binning (renderer/modes/HUD read them unchanged).
+  fluid: {
+    // --- MAC grid ---
+    h: 0.45,               // cell size (m). Pressure resolution AND the size of
+                           // the staircase a thin member seals: below ~0.35 the
+                           // solve gets expensive, above ~0.6 gaps stop leaking.
+    yPad: 1.5,             // m of grid below the lowest terrain point
+    yHead: 9,              // m of grid above the highest terrain point (splash room)
+    maxCells: 90000,       // safety valve: coarsen h rather than blow this budget
+
+    // --- particles ---
+    spacing: 0.30,         // seed pitch (m); particle volume = spacing² (m² here)
+    spacingSpanRef: 70,    // m of terrain span at which `spacing` applies. Wider
+                           // levels hold proportionally more water, so particles
+                           // grow with sqrt(span) and the COUNT stays bounded.
+    spacingMax: 0.46,
+    radiusFrac: 0.46,      // particle radius / spacing (collision radius)
+    separation: 0.95,      // push-apart rest distance in units of spacing: under
+                           // 1.0, so a freshly seeded lattice is already relaxed
+    separationIters: 2,
+    maxParticles: 16000,
+    seedJitter: 0.04,      // fraction of spacing (hash-based, never Math.random)
+
+    // --- inflow (addSource) ---
+    // A source is an INLET, not a tap: it injects rate·dt m² per tick through a
+    // rectangle of height rate/sourceSpeed and width sourceSpeed·dt, moving
+    // downhill at sourceSpeed. Dropping the same water through a narrow spout
+    // instead builds a needle-thin tower over the source (measured: 16 m of
+    // "depth" on level 5) because the plateau cannot drain it as fast as it lands.
+    sourceSpeed: 5,        // m/s the inflow arrives at
+    sourceSlopeEps: 0.02,  // |dy/dx| below which the inlet just aims +x
+
+    // --- stepping ---
+    maxSpeed: 18,          // m/s clamp per component-sum (explosion guard)
+    maxSubsteps: 8,
+    moveFrac: 0.5,         // max advection per substep in particle radii — the
+                           // no-tunnelling guarantee, with push-out along the
+                           // entry normal doing the rest
+    flip: 0.9,             // PIC/FLIP blend (1 = pure FLIP, lively but noisy)
+
+    // --- pressure solve ---
+    pressureIters: 40,     // Gauss-Seidel sweeps per tick (warm-started)
+    primeIters: 400,       // one-off sweeps on the FIRST solve so a pre-filled
+                           // reservoir starts already hydrostatic (no initial sag)
+    sor: 1.6,              // over-relaxation
+    driftK: 0.02,          // density-drift compensation: pushes over-packed cells
+                           // apart through the solve, which is what keeps a deep
+                           // reservoir from slowly compressing and boiling
+
+    // --- solids ---
+    solidPad: 0.16,        // m a capsule reaches past its own radius when claiming
+                           // a cell as solid: a member thinner than a cell must
+                           // still seal the cell it passes through
+    terrainSolidFrac: 0.5, // fraction of a cell the terrain must fill to be solid
+    wallFriction: 0.8,     // tangential velocity kept per wall/bed contact. Water
+                           // is nearly frictionless: much below this a shallow
+                           // sheet on a flat plateau stops draining, much above it
+                           // and lone particles ping around the reservoir.
+    restitution: 0.0,      // water does not bounce
+
+    // --- compat rasterisation (blocked/sealed/crest for renderer + events) ---
+    blockReach: 0.2,       // cells a member's blocked interval reaches beyond its
+                           // own x-span. v1 needed a full cell here to keep the
+                           // COLUMN solver watertight; v2 seals with capsules, so
+                           // this must stay small — a blocked boundary the capsule
+                           // does not actually cover reports sloshing water as
+                           // gapFlow and fires phantom breaches.
+
+    // Event floor in PARTICLES per second. The v1 flux thresholds
+    // (coupling.breachFlowMin / overtopFlowMin) were written for a continuous
+    // model; measured particle flux is quantised at pvol per crossing, so 0.05
+    // m²/s is HALF A DROPLET and one splash over the crest would announce
+    // "OVERTOPPED". This floor is what makes an event mean a real, running stream.
+    eventFlowParticles: 3,
+
+    // --- derived diagnostics (renderer compat) ---
+    flowTau: 0.18,         // s; EMA on per-boundary particle flux, so a jet reads
+                           // as a steady jet instead of per-particle flicker
+    velTau: 0.10,          // s; EMA on the derived column velocities
+    forceTau: 0.05,        // s; EMA on member forces — short enough to keep a
+                           // wave's impact peak, long enough to kill 1-frame spikes
+    volSmoothPasses: 1,    // [1 2 1] passes over the binned column volume before
+                           // it becomes `depth`. One particle is 0.09 m² and a
+                           // column is 0.4 m wide, so raw binning gives the
+                           // surface a ±0.25 m saw-tooth that is pure sampling
+                           // noise. Volume-preserving, so retention stays exact.
   },
 
   coupling: {
@@ -67,24 +148,17 @@ export const CONFIG = {
     impactSpeedMin: 3.0,   // m/s the water must actually be moving to count as a
                            // hit (a tall wall integrates a big force out of a
                            // slow current, and that is not an impact)
-    sampleStep: 0.35,      // segment sampling step for pressure integration (m)
 
     // --- OPUS A: obstruction rasterisation ------------------------------
     mergeEps: 0.12,        // m; blocked intervals this close fuse (watertight wall).
                            // Well under the 0.5 m build grid, so a gap a player
                            // can actually draw still leaks.
-    sealReachCells: 1.0,   // a member also seals boundaries this many cells beyond
-                           // its own x-span, so a chain of members that has
-                           // deflected still shares boundaries and stays watertight
     groundSealEps: 0.3,    // m; a member foot this close to the sill seals to bed
     groundSealSink: 1.0,   // m the sealed foot is pushed below the sill
     maxIntervals: 24,      // per boundary before collapsing to one span
     vertEps: 1e-4,         // degenerate-geometry epsilon
 
     // --- OPUS A: force shaping ------------------------------------------
-    impactProbeCells: 5,   // cells upstream searched for the approach velocity
-                           // (clear of the stalled water against the face)
-    minNormalX: 0.1,       // below this |normal.x| a member takes no face load
     verticalScale: 1.0,    // vertical component on a battered (leaning) face
     submergeDepth: 0.3,    // m of depth for full buoyancy (smooth entry)
     dragImpulseCap: 0.6,   // max fraction of relative velocity removed per tick

@@ -1,32 +1,28 @@
-// OPUS A owns. 1-D shallow-water column grid (pipe model with momentum).
-// Contract: ARCHITECTURE.md §5 "Water". DOM-free, deterministic (no Math.random).
+// OPUS A owns. Water v2: the public water surface over the PIC/FLIP particle
+// fluid in physics/fluid.js. Contract: ARCHITECTURE.md §5 "Water v2".
+// DOM-free, deterministic (no Math.random anywhere).
 //
-// Layout:  cell i covers x ∈ [x0 + i·cellW, x0 + (i+1)·cellW], centre at
-// x0 + (i+0.5)·cellW.  Boundary b sits at x = x0 + b·cellW between cells b−1
-// and b; boundaries 0 and n are closed walls, so the domain conserves mass.
+// The water IS particles (water.pcount / ppx / ppy / pvx / pvy). Everything the
+// rest of the game reads is DERIVED from them once per tick, so renderer, HUD,
+// modes and the level suite keep working against the v1 column contract:
 //
-// Every boundary carries a horizontal velocity (momentum), which is what makes a
-// released reservoir arrive downstream as a travelling wave front instead of
-// teleporting.
+//   depth[i]   particle volume binned into column i, divided by cellW. Because
+//              every particle carries exactly pvol, volumeBetween/totalVolume
+//              and stats.totalIn stay in the same units and retention is exact.
+//   vel[b]     volume-weighted mean particle vx at the boundary (EMA-smoothed)
+//   flow[b]    MEASURED particle flux across the boundary (m²/s), split into
+//              gapFlow (below the sealed crest → leak/breach jets) and weirFlow
+//              (above it → overtopping nappe). Nothing about them is modelled:
+//              a particle crossed, so it is counted.
+//   blocked/sealed/crest/bedB  written by coupling from the same member capsules
+//              the fluid collides with, so the renderer's jets and nappes line
+//              up with where the water physically goes.
 //
-// THE KEY FEATURE — blocked boundaries.  coupling.js rasterises the dam into
-// merged y-intervals per boundary (water.blocked[b]).  Water may only cross a
-// boundary through the OPEN part of the wetted cross-section:
-//
-//   * fully blocked from the bed to above the surface → flux is exactly 0, the
-//     reservoir just rises (no numerical seepage, or the game is unwinnable);
-//   * an open interval below the crest → orifice/jet flux, ∝ gap · √(2g·head);
-//   * surface above the blocked crest → weir-like overtopping, ∝ H^1.5.
-//
-// Per-boundary diagnostics (additions to the contract, read-only for others):
-//   flow[b]      signed applied flux, m²/s, + = towards +x
-//   gapFlow[b]   part of flow[b] squeezing through gaps/holes (breach jets)
-//   weirFlow[b]  part of flow[b] going over the crest (overtopping)
-//   sealed[b]    1 when the boundary currently carries blocking intervals
-//   crest[b]     top of the blockage (bed elevation when unblocked)
-//   bedB[b]      sill elevation of the boundary = max of the two cell beds
+// Layout is unchanged from v1: cell i covers [x0+i·cellW, x0+(i+1)·cellW],
+// boundary b sits at x0+b·cellW.
 
 import { CONFIG } from '../config.js';
+import * as F from './fluid.js';
 
 export function createWater(terrain, cfg) {
   const c = cfg || CONFIG.water;
@@ -42,28 +38,45 @@ export function createWater(terrain, cfg) {
   bedB[n] = bed[n - 1];
   for (let b = 1; b < n; b++) bedB[b] = Math.max(bed[b - 1], bed[b]);
 
-  return {
-    x0, cellW: c.cellW, n, cfg: c,
+  const fluid = F.createFluid(terrain);
+  const crest = new Float32Array(n + 1);
+  crest.set(bedB);
+
+  const water = {
+    x0, cellW: c.cellW, n, cfg: c, terrain,
     bed, bedB,
     depth: new Float32Array(n),
     vel: new Float32Array(n + 1),
     blocked: new Array(n + 1).fill(null),
-    // diagnostics, averaged over the substeps of the last tick
     flow: new Float32Array(n + 1),
     gapFlow: new Float32Array(n + 1),
     weirFlow: new Float32Array(n + 1),
-    crest: new Float32Array(n + 1),
+    crest,
     sealed: new Uint8Array(n + 1),
     sources: [],
     time: 0,
     stats: { totalIn: 0 },
+
+    // ---- v2 surface ----
+    fluid,
+    pcount: 0,
+    ppx: fluid.px, ppy: fluid.py, pvx: fluid.pvx, pvy: fluid.pvy,
+    pvol: fluid.pvol, pradius: fluid.radius,
+    colliderForces: [],          // [{ref, fx, fy, x, y, speed}], rebuilt per tick
+
     // scratch (never read from outside)
-    _q: new Float32Array(n + 1),
-    _qg: new Float32Array(n + 1),
-    _qw: new Float32Array(n + 1),
-    _out: new Float32Array(n),
-    _scale: new Float32Array(n),
+    _colVol: new Float64Array(n),
+    _colTmp: new Float64Array(n),
+    _colTmp2: new Float64Array(n),
+    _colMom: new Float64Array(n),
+    _inst: new Float64Array(n + 1),
+    _instGap: new Float64Array(n + 1),
+    _instWeir: new Float64Array(n + 1),
+    _prevX: new Float64Array(fluid.max),
+    _caps: null, _capCount: 0,
+    _forcePool: [],
   };
+  return water;
 }
 
 // ---- lookups -------------------------------------------------------------
@@ -93,6 +106,16 @@ export function velAt(water, x) {
   return (water.vel[i] + water.vel[i + 1]) * 0.5;
 }
 
+// True 2-D fluid velocity at a point (drag on submerged nodes and debris).
+export function fluidVelAt(water, x, y, out) {
+  const o = out || { x: 0, y: 0 };
+  o.x = F.sampleU(water.fluid, x, y);
+  o.y = F.sampleV(water.fluid, x, y);
+  return o;
+}
+
+export function pressureAt(water, x, y) { return F.pressureAt(water.fluid, x, y); }
+
 export function flowAt(water, x) { return water.flow[boundaryIndex(water, x)]; }
 
 export function volumeBetween(water, x0, x1) {
@@ -119,26 +142,57 @@ export function totalVolume(water) {
 
 // ---- filling -------------------------------------------------------------
 
+// Instant fill to a surface elevation: a grid-aligned block of particles under
+// `surface`, skipping anything already under water (so repeated calls top up
+// rather than double-fill).
 export function addWater(water, { x0, x1, surface }) {
-  for (let i = 0; i < water.n; i++) {
-    const x = water.x0 + (i + 0.5) * water.cellW;
-    if (x >= x0 && x <= x1) {
-      const d = Math.max(0, surface - water.bed[i]);
-      if (d > water.depth[i]) {
-        water.stats.totalIn += (d - water.depth[i]) * water.cellW;
-        water.depth[i] = d;
-      }
+  const f = water.fluid;
+  const occupied = (x, y) => y < surfaceAt(water, x) - water.cfg.minDepth;
+  const added = F.seedBlock(f, x0, x1, surface, water.pcount > 0 ? occupied : null);
+  water.stats.totalIn += added;
+  derive(water, CONFIG.physics.dt, true);
+  return added;
+}
+
+export function addSource(water, { x, rate, duration = Infinity, delay = 0 }) {
+  water.sources.push({ x, rate, duration, delay, t: 0, acc: 0, seq: 0 });
+}
+
+export function setBoundaryBlocks(water, blocked) {
+  water.blocked = blocked;
+  const n = water.n;
+  for (let b = 0; b <= n; b++) {
+    const blk = blocked ? blocked[b] : null;
+    if (blk && blk.length) {
+      water.sealed[b] = 1;
+      let c = water.bedB[b];
+      for (let k = 0; k < blk.length; k++) if (blk[k][1] > c) c = blk[k][1];
+      water.crest[b] = c;
+    } else {
+      water.sealed[b] = 0;
+      water.crest[b] = water.bedB[b];
     }
   }
 }
 
-export function addSource(water, { x, rate, duration = Infinity, delay = 0 }) {
-  water.sources.push({ x, rate, duration, delay, t: 0 });
+// capsules: [{ax,ay,bx,by,r,ref}] from coupling (unbroken sealing members).
+// Replaces v1's blocked-interval rasterisation as the thing water collides with.
+export function setColliders(water, caps, count) {
+  water._caps = caps;
+  water._capCount = count === undefined ? (caps ? caps.length : 0) : count;
+  F.setColliders(water.fluid, caps, water._capCount);
 }
 
-export function setBoundaryBlocks(water, blocked) { water.blocked = blocked; }
-
+// Deterministic emission. A fractional accumulator turns m²/s into whole
+// particles; they are injected through a mass-consistent INLET — a rectangle of
+// height rate/v and width v·dt, moving downhill at v — so the flux the level
+// asked for arrives as a moving stream. Spawning it through a point spout instead
+// builds a tower over the source that no slope can drain.
 function applySources(water, dt) {
+  const f = water.fluid;
+  const Fc = CONFIG.fluid;
+  const s2 = f.spacing;
+  const v = Fc.sourceSpeed;
   for (const s of water.sources) {
     const t0 = s.t;
     s.t += dt;
@@ -146,10 +200,24 @@ function applySources(water, dt) {
     const end = Math.min(s.delay + s.duration, s.t);
     const active = end - start;
     if (!(active > 0)) continue;
-    const i = cellIndex(water, s.x);
-    const vol = s.rate * active;
-    water.depth[i] += vol / water.cellW;
-    water.stats.totalIn += vol;
+    s.acc += (s.rate * active) / f.pvol;
+    let k = Math.floor(s.acc);
+    if (k <= 0) continue;
+    s.acc -= k;
+
+    const slope = (F.bedAt(f, s.x + 0.5) - F.bedAt(f, s.x - 0.5)) * 0.5;
+    const dir = slope > Fc.sourceSlopeEps ? -1 : 1;      // downhill (flat aims +x)
+    const hIn = Math.max(s2, s.rate / v);                // inlet height  = rate/v
+    const wIn = Math.max(s2 * 0.5, v * dt);              // inlet width   = v·dt
+    // sits on the ground when dry, rides the surface when there is already a pool
+    const base = Math.max(surfaceAt(water, s.x), F.bedAt(f, s.x)) + s2 * 0.5;
+    for (let j = 0; j < k; j++) {
+      const seq = s.seq++;
+      const px = s.x + (F.hash01(seq, 17) - 0.5) * wIn;
+      const py = base + F.hash01(seq, 31) * hIn;
+      if (!F.addParticle(f, px, py, dir * v, 0)) break;
+      water.stats.totalIn += f.pvol;
+    }
   }
 }
 
@@ -157,159 +225,146 @@ function applySources(water, dt) {
 
 export function stepWater(water, dt) {
   if (!water) return;
-  const c = water.cfg;
-  const sub = Math.max(1, c.substeps | 0);
-  const h = dt / sub;
-  // cfg.damping is per TICK; spread it across the substeps so the substep count
-  // does not silently change how fast a flood front loses its momentum
-  const damp = sub === 1 ? c.damping : Math.pow(c.damping, 1 / sub);
+  const f = water.fluid;
 
   applySources(water, dt);
 
-  water.flow.fill(0);
-  water.gapFlow.fill(0);
-  water.weirFlow.fill(0);
+  // remember where every particle was, so the flux across each boundary is
+  // MEASURED rather than modelled
+  const n = f.pcount;
+  for (let i = 0; i < n; i++) water._prevX[i] = f.px[i];
 
-  for (let s = 0; s < sub; s++) {
-    computeFluxes(water, h, damp);
-    transfer(water, h);
-  }
+  F.stepFluid(f, dt);
 
-  const invSub = 1 / sub;
-  for (let b = 0; b <= water.n; b++) {
-    water.flow[b] *= invSub;
-    water.gapFlow[b] *= invSub;
-    water.weirFlow[b] *= invSub;
-  }
+  derive(water, dt, false);
+  collectForces(water);
   water.time += dt;
 }
 
-function computeFluxes(water, h, damp) {
-  const c = water.cfg;
+// Rebuild the v1 column contract from the particles.
+function derive(water, dt, instant) {
+  const f = water.fluid;
   const n = water.n, cw = water.cellW;
-  const g = c.g, maxVel = c.maxVel;
-  const q = water._q, qg = water._qg, qw = water._qw;
-  const depth = water.depth, bed = water.bed;
+  const vol = water._colVol, mom = water._colMom;
+  vol.fill(0); mom.fill(0);
 
-  q[0] = 0; qg[0] = 0; qw[0] = 0; water.vel[0] = 0;
-  q[n] = 0; qg[n] = 0; qw[n] = 0; water.vel[n] = 0;
-
-  for (let b = 1; b < n; b++) {
-    const iL = b - 1, iR = b;
-    const sill = water.bedB[b];
-    const sL = bed[iL] + depth[iL];
-    const sR = bed[iR] + depth[iR];
-    const blk = water.blocked[b];
-    const hasBlk = !!(blk && blk.length);
-    water.sealed[b] = hasBlk ? 1 : 0;
-    qg[b] = 0; qw[b] = 0;
-
-    const sUp = sL > sR ? sL : sR;
-    if (sUp <= sill + c.minDepth) {          // nothing to move at this sill
-      q[b] = 0;
-      water.vel[b] = 0;
-      water.crest[b] = hasBlk ? blockCrest(blk, sill) : sill;
-      continue;
-    }
-
-    if (!hasBlk) {
-      water.crest[b] = sill;
-      // momentum pipe flow: dv/dt = g·d(surface)/dx
-      let v = (water.vel[b] + (g * (sL - sR) / cw) * h) * damp;
-      if (v > maxVel) v = maxVel; else if (v < -maxVel) v = -maxVel;
-      let hUp = (v >= 0 ? sL : sR) - sill;   // upwind depth over the sill
-      if (hUp <= 0) { v = 0; hUp = 0; }
-      water.vel[b] = v;
-      q[b] = v * hUp;
-      continue;
-    }
-
-    // ---- gated boundary --------------------------------------------------
-    const crest = blockCrest(blk, sill);
-    water.crest[b] = crest;
-    const sDn = sL > sR ? sR : sL;
-    const dir = sL > sR ? 1 : -1;
-    let gap = 0, weir = 0, openH = 0;
-
-    // gaps between the sill and the crest
-    let cursor = sill;
-    for (let k = 0; k < blk.length; k++) {
-      const iv = blk[k];
-      const y0 = iv[0] > sill ? iv[0] : sill;
-      const y1 = iv[1] > sill ? iv[1] : sill;
-      if (y1 <= sill) continue;
-      if (y0 > cursor + c.sealEps) {
-        const top = Math.min(y0, sUp);
-        if (top > cursor) {
-          const a = top - cursor;
-          const mid = (cursor + top) * 0.5;
-          const head = sUp - Math.max(sDn, mid);
-          if (head > 0) { gap += c.orificeCoeff * a * Math.sqrt(2 * g * head); openH += a; }
-        }
-      }
-      if (y1 > cursor) cursor = y1;
-    }
-
-    // free surface above the crest → weir
-    const H = sUp - crest;
-    if (H > 0) {
-      let f = c.weirCoeff * Math.sqrt(g) * Math.pow(H, 1.5);
-      const Hd = sDn - crest;
-      if (Hd > 0) {
-        // Villemonte drowned-weir reduction → smoothly zero as levels equalise
-        const r = Math.min(1, Hd / H);
-        f *= Math.pow(Math.max(0, 1 - Math.pow(r, 1.5)), c.weirDrownExp);
-      }
-      weir = f;
-      openH += H;
-    }
-
-    qg[b] = dir * gap;
-    qw[b] = dir * weir;
-    q[b] = qg[b] + qw[b];
-    let v = openH > c.minDepth ? q[b] / openH : 0;
-    if (v > maxVel) v = maxVel; else if (v < -maxVel) v = -maxVel;
-    water.vel[b] = v;
+  const pv = f.pvol;
+  const cnt = f.pcount;
+  // Linear (tent) spread over the two nearest columns: a particle is 0.3 m wide,
+  // so dumping its whole volume in one 0.4 m column makes a lone splash droplet
+  // read as a 0.22 m puddle. Weights sum to 1, so volume is still exact.
+  for (let i = 0; i < cnt; i++) {
+    const t = (f.px[i] - water.x0) / cw - 0.5;
+    let i0 = Math.floor(t);
+    const s = t - i0;
+    let i1 = i0 + 1;
+    if (i0 < 0) i0 = 0;
+    if (i1 > n - 1) i1 = n - 1;
+    if (i0 > n - 1) i0 = n - 1;
+    if (i1 < 0) i1 = 0;
+    const w1 = s, w0 = 1 - s;
+    const vx = f.pvx[i];
+    vol[i0] += pv * w0; mom[i0] += pv * w0 * vx;
+    vol[i1] += pv * w1; mom[i1] += pv * w1 * vx;
   }
-}
 
-// Top of the blockage above the sill (sill itself when nothing blocks it).
-function blockCrest(blk, sill) {
-  let crest = sill;
-  for (let k = 0; k < blk.length; k++) if (blk[k][1] > crest) crest = blk[k][1];
-  return crest;
-}
-
-// Move the water. Outflow per cell is capped at transferCap·depth so depth can
-// never go negative and mass is conserved exactly (closed domain edges).
-function transfer(water, h) {
-  const n = water.n, cw = water.cellW;
-  const cap = water.cfg.transferCap;
-  const q = water._q, out = water._out, scale = water._scale;
+  // [1 2 1] smoothing of the binned volume: kills the sampling saw-tooth without
+  // moving any water out of the domain (the reflective edge folds the outside
+  // share back into the edge column, so Σvol — and retention — is untouched).
+  // `vol` itself stays raw: it is the weight for the velocity average below.
+  const passes = CONFIG.fluid.volSmoothPasses | 0;
   const depth = water.depth;
+  if (passes > 0) {
+    const a = water._colTmp, b = water._colTmp2;
+    let src = vol, dst = a;
+    for (let k = 0; k < passes; k++) {
+      for (let i = 0; i < n; i++) {
+        const l = i > 0 ? src[i - 1] : src[i];
+        const r = i < n - 1 ? src[i + 1] : src[i];
+        dst[i] = (l + 2 * src[i] + r) * 0.25;
+      }
+      src = dst;
+      dst = dst === a ? b : a;
+    }
+    for (let i = 0; i < n; i++) depth[i] = src[i] / cw;
+  } else {
+    for (let i = 0; i < n; i++) depth[i] = vol[i] / cw;
+  }
 
-  out.fill(0);
-  for (let b = 1; b < n; b++) {
-    const d = (q[b] * h) / cw;
-    if (d > 0) out[b - 1] += d;
-    else if (d < 0) out[b] -= d;
+  // boundary velocities from the two adjacent columns (volume-weighted)
+  const Fc = CONFIG.fluid;
+  const aV = instant ? 1 : 1 - Math.exp(-dt / Math.max(1e-4, Fc.velTau));
+  const vel = water.vel;
+  for (let b = 0; b <= n; b++) {
+    const iL = b - 1, iR = b;
+    let m = 0, v = 0;
+    if (iL >= 0) { m += vol[iL]; v += mom[iL]; }
+    if (iR < n) { m += vol[iR]; v += mom[iR]; }
+    const target = m > 1e-9 ? v / m : 0;
+    vel[b] += (target - vel[b]) * aV;
   }
+
+  water.pcount = f.pcount;
+  water.ppx = f.px; water.ppy = f.py; water.pvx = f.pvx; water.pvy = f.pvy;
+
+  if (instant) {
+    water.flow.fill(0); water.gapFlow.fill(0); water.weirFlow.fill(0);
+    return;
+  }
+
+  // ---- measured flux per boundary ----
+  const inst = water._inst, ig = water._instGap, iw = water._instWeir;
+  inst.fill(0); ig.fill(0); iw.fill(0);
+  const invDt = 1 / dt;
+  const prevX = water._prevX;
+  for (let i = 0; i < cnt; i++) {
+    const xa = prevX[i], xb = f.px[i];
+    if (xa === xb) continue;
+    const ta = (xa - water.x0) / cw, tb = (xb - water.x0) / cw;
+    let b0, b1, sign;
+    if (tb > ta) { b0 = Math.ceil(ta); b1 = Math.floor(tb); sign = 1; }
+    else { b0 = Math.ceil(tb); b1 = Math.floor(ta); sign = -1; }
+    if (b1 < b0) continue;
+    if (b0 < 0) b0 = 0;
+    if (b1 > n) b1 = n;
+    const q = sign * pv * invDt;
+    const y = f.py[i];
+    for (let b = b0; b <= b1; b++) {
+      inst[b] += q;
+      if (water.sealed[b] && y > water.crest[b]) iw[b] += q; else ig[b] += q;
+    }
+  }
+  const aF = 1 - Math.exp(-dt / Math.max(1e-4, Fc.flowTau));
+  for (let b = 0; b <= n; b++) {
+    water.flow[b] += (inst[b] - water.flow[b]) * aF;
+    const g = water.sealed[b] ? ig[b] : 0;
+    const w = water.sealed[b] ? iw[b] : 0;
+    water.gapFlow[b] += (g - water.gapFlow[b]) * aF;
+    water.weirFlow[b] += (w - water.weirFlow[b]) * aF;
+  }
+}
+
+// Per-collider force objects for coupling (pooled: no per-tick allocation).
+function collectForces(water) {
+  const f = water.fluid;
+  const caps = water._caps;
+  const n = water._capCount;
+  const out = water.colliderForces;
+  out.length = 0;
+  if (!caps || !n) return;
+  const pool = water._forcePool;
   for (let i = 0; i < n; i++) {
-    const avail = depth[i] * cap;
-    scale[i] = out[i] > avail ? (out[i] > 0 ? avail / out[i] : 0) : 1;
+    const w = f.cw[i];
+    if (w <= 0 && f.cfx[i] === 0 && f.cfy[i] === 0) continue;
+    let o = pool[out.length];
+    if (!o) { o = { ref: null, ci: 0, fx: 0, fy: 0, x: 0, y: 0, speed: 0 }; pool[out.length] = o; }
+    o.ref = caps[i].ref;
+    o.ci = i;
+    o.fx = f.cfx[i];
+    o.fy = f.cfy[i];
+    o.x = w > 0 ? f.cax[i] / w : (caps[i].ax + caps[i].bx) * 0.5;
+    o.y = w > 0 ? f.cay[i] / w : (caps[i].ay + caps[i].by) * 0.5;
+    o.speed = f.cspd[i];
+    out.push(o);
   }
-  for (let b = 1; b < n; b++) {
-    let d = (q[b] * h) / cw;
-    if (d === 0) { continue; }
-    const k = scale[d > 0 ? b - 1 : b];
-    if (k !== 1) d *= k;
-    depth[b - 1] -= d;
-    depth[b] += d;
-    const applied = (d * cw) / h;
-    const ratio = q[b] !== 0 ? applied / q[b] : 0;
-    water.flow[b] += applied;
-    water.gapFlow[b] += water._qg[b] * ratio;
-    water.weirFlow[b] += water._qw[b] * ratio;
-  }
-  for (let i = 0; i < n; i++) if (depth[i] < 0) depth[i] = 0;
 }

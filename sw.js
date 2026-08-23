@@ -25,6 +25,7 @@ const ASSETS = [
   './src/physics/stress.js',
   './src/physics/water.js',
   './src/physics/coupling.js',
+  './src/physics/fluid.js',
   './src/build/builder.js',
   './src/build/snapping.js',
   './src/build/materials.js',
