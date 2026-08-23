@@ -228,7 +228,8 @@ import { on, off, emit } from '../core/events.js';
 | `sim:start` / `sim:reset` | `{}`                                  | game    |
 | `level:win` / `level:fail`| `{stats}` (fail adds `{cause}`)       | modes   |
 | `phase:change`   | `{phase}`                                      | game    |
-| `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` | | hud |
+| `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` `ui:undo` | | hud |
+| `ui:level`       | `{index}` (1-based campaign index)             | screens |
 | `input:down/move/up` | `{x, y, px, py, id}` (world + pixel)       | input   |
 | `input:pan` `{dx,dy}` px · `input:zoom` `{px,py,factor}` · `input:key` `{key}` | | input |
 
