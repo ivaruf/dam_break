@@ -1,0 +1,337 @@
+# DAM BUILDER — ARCHITECTURE CONTRACT
+
+**Owner of this file: FABLE (game director).** This file is the single source of
+truth for shared interfaces. No agent may change an interface without Fable
+updating this document first. If you need a change, report WHY to your parent;
+do not silently break the contract.
+
+---
+
+## 1. Technology
+
+- HTML + CSS + vanilla JS (ES modules), Canvas 2D. No frameworks, no build step.
+- PWA like `../maxgear`: `manifest.webmanifest` + `sw.js` versioned precache with
+  opt-in updates ("UPDATE READY" button). All paths **relative** (GitHub Pages
+  subpath). Runs via `python3 -m http.server` locally or GitHub Pages.
+- Must work with mouse **and** touch (Pointer Events; pinch zoom, drag pan).
+- Physics modules (`src/physics/*`, `src/build/materials.js`, `src/levels/levels.js`,
+  `src/core/terrain.js`) must be **DOM-free** so they run under Node for tests.
+
+## 2. Coordinate system & units
+
+- World units are **meters**, **y-up** (gravity is −y). The renderer does the
+  single y-flip: `screenY = h/2 − (y − cam.y)·zoom`.
+- Terrain is a heightfield polyline left→right. Levels span roughly x ∈ [0, 60..150],
+  dam heights 5–15 m.
+- Fixed physics timestep `CONFIG.physics.dt = 1/60`, accumulator clamped to
+  0.25 s. Sim speed 0.25/1/2/4 = fractional/multiple ticks per frame.
+- **Determinism**: no `Math.random()` in physics. Visual effects may use randomness.
+
+## 3. Simulation update loop (owned by core/game.js)
+
+Per physics tick during `sim` phase, **in this order**:
+
+```
+coupling.updateObstructions(structure, water)   // structure → water geometry
+water.stepWater(water, dt)                      // bulk water movement
+coupling.applyWaterForces(structure, water, dt) // water → node force accumulators
+constraints.stepStructure(structure, terrain, dt) // verlet + solver + ground
+stress.updateStress(structure, dt, time)        // strain→load→damage→breaks
+modes.update(dt)                                // objectives, win/fail
+effects.step(dt)                                // visual only (every frame ok)
+```
+
+Render every animation frame (interpolation not required for v1).
+
+## 4. File ownership
+
+```
+FABLE (do not edit without Fable):
+  index.html  manifest.webmanifest  sw.js  ARCHITECTURE.md  README.md
+  src/main.js  src/config.js
+  src/core/game.js  src/core/state.js  src/core/events.js
+  src/core/terrain.js  src/core/camera.js  src/core/input.js
+
+OPUS A — Physics & Simulation:
+  src/physics/structures.js   (nodes/members/debris data + instantiate)
+  src/physics/constraints.js  (verlet integration + iterative solver + ground collision)
+  src/physics/stress.js       (strain→load→damage→break, failure record)
+  src/physics/water.js        (1-D shallow-water column grid)
+  src/physics/coupling.js     (two-way water↔structure interface)
+  tests/*                     (Node test scenes 1–8, `node tests/run.js`)
+
+OPUS B — Construction & Gameplay:
+  src/build/builder.js        (design editing: place/connect/delete/ghost)
+  src/build/snapping.js       (grid/node/anchor snapping, validity)
+  src/build/materials.js      (material data, pure data module)
+  src/build/modes.js          (phase flow, countdown, objectives, win/fail, stats)
+
+OPUS C — Rendering, UX & Content:
+  styles.css
+  src/rendering/renderer.js   src/rendering/waterRenderer.js  src/rendering/effects.js
+  src/ui/hud.js  src/ui/screens.js  src/ui/debug.js
+  src/levels/levels.js  src/levels/levelLoader.js
+```
+
+Rule: only the owner performs major edits to a file. Everyone may READ anything.
+
+## 5. Core shared data structures
+
+### Terrain (created by `core/terrain.js`)
+
+```js
+createTerrain(points, anchorSpecs) => terrain
+terrain = {
+  points,            // [[x,y],...] left→right ground surface
+  anchors,           // [{id, x, y, r}]  r = snap radius (default 0.9)
+  minX, maxX,
+  heightAt(x),       // piecewise-linear ground elevation (clamped outside range)
+}
+```
+
+### Design (build-time; produced by builder, consumed by structures.instantiate)
+
+```js
+design = {
+  nodes:   [{id, x, y, anchorId}],   // anchorId: terrain anchor id or null
+  members: [{id, a, b, mat}],        // a/b = node ids, mat = material id string
+}
+```
+
+### Material (schema; data lives in `src/build/materials.js`)
+
+```js
+{
+  id, name, color, darkColor,
+  costPerMeter, massPerMeter,
+  thickness,            // meters; visual width AND water-sealing width
+  stiffness,            // 0..1 constraint stiffness per solver iteration
+  tensionLimit,         // strain (ΔL/L) at load = 1.0 in tension
+  compressionLimit,     // strain at load = 1.0 in compression (positive number)
+  tensionOnly,          // true for cable: no compression resistance, no water seal
+  minLength, maxLength, // build constraints (meters)
+  sealing,              // true if it blocks water (cable: false)
+}
+```
+
+### Structure (runtime physics; owned by Opus A)
+
+```js
+structures.instantiate(design, terrain, materials) => structure
+structure = {
+  nodes: [{
+    id, x, y, px, py,     // verlet current + previous
+    invMass,              // 0 when anchored
+    anchored, ax, ay,     // anchor world position when anchored
+    fx, fy,               // EXTERNAL force accumulator (water writes, solver consumes+clears)
+    onGround,             // set by collision pass
+  }],
+  members: [{
+    id, a, b,             // node object refs
+    mat,                  // material object ref
+    restLength, broken,
+    strain,               // signed (ΔL/L), + = tension
+    load,                 // utilization ≥ 0; 1.0 = at limit (uses tension/compression limit by sign)
+    loadSign,             // +1 tension, −1 compression
+    damage,               // 0..1 accumulated; break at ≥ 1
+  }],
+  debris: [],             // broken free pieces, same node/member shapes, no build meaning
+  time, brokenCount, maxLoad,
+  firstFailure,           // null | {memberId, mode:'tension'|'compression', time, x, y}
+}
+```
+
+**Force convention**: anything external (water, wind later) ADDS to `node.fx/fy`
+(game-newtons). `constraints.stepStructure` applies `a = f·invMass + g`, then
+zeroes the accumulators. Nobody else zeroes them.
+
+### Water (owned by Opus A) — 1-D shallow-water column grid (DIRECTOR DECISION)
+
+Bulk water is a column heightfield with per-boundary flow (pipe model /
+shallow-water style). Visual particles are decorative only (Opus C). This is
+final for v1 — no particle-based bulk sim.
+
+```js
+water.createWater(terrain, cfg) => water
+water = {
+  x0, cellW, n,               // grid origin, cell width (CONFIG.water.cellW), cell count
+  bed,                        // Float32Array(n) terrain elevation at cell centers
+  depth,                      // Float32Array(n) water depth ≥ 0
+  vel,                        // Float32Array(n+1) horizontal velocity at boundaries
+  blocked,                    // Array(n+1) of null | [[y0,y1],...] merged blocked intervals per boundary
+  stats: { totalIn, /* volume added by sources */ },
+}
+water.stepWater(water, dt)
+water.addWater(water, {x0, x1, surface})            // instant fill to surface elevation
+water.addSource(water, {x, rate, duration, delay})  // inflow (m²/s in 2-D world)
+water.setBoundaryBlocks(water, blocked)             // coupling writes obstruction geometry
+water.surfaceAt(water, x)   // bed+depth elevation (bed height where dry)
+water.depthAt(water, x)
+water.velAt(water, x)       // horizontal velocity
+water.volumeBetween(water, x0, x1)
+```
+
+Required behavior: downhill flow, accumulation against blocked boundaries,
+rising reservoir, flow through un-blocked y-intervals (leaks ∝ gap size and
+head difference; orifice-like), overtopping when surface exceeds the blocked
+crest (weir-like), momentum so a flood front arrives as a moving wave.
+
+### Coupling (owned by Opus A) — THE most important module
+
+```js
+coupling.updateObstructions(structure, water)
+  // Rasterize every unbroken member with mat.sealing into blocked y-intervals
+  // per water boundary the segment crosses; merge overlaps; write via
+  // setBoundaryBlocks. Broken members leave the profile → breach emerges.
+
+coupling.applyWaterForces(structure, water, dt)
+  // For each sealing member segment: sample local depth each side (segment
+  // normal decides sides), hydrostatic p = ρ·g·depth·pressureScale, net force
+  // ⊥ to segment over submerged length, half to each node.
+  // Add dynamic impact term ~ ρ·v²·impactScale for moving water hitting a face.
+  // Buoyancy + drag on submerged nodes and debris (drag toward water.velAt).
+  // Emits events: 'water:impact' (first strong hits), 'breach', 'overtop'.
+```
+
+Water depth MUST increase load (hydrostatic), and fast water MUST hit harder
+than still water (dynamic term). Both directions of the interaction are
+mandatory: dam blocks/redirects water; water loads and destroys dam.
+
+### Damage model (stress.js; thresholds in CONFIG.damage)
+
+```
+load < 0.8            safe
+0.8 – 1.0             visible stress (render concern only)
+1.0 – 1.2             damage += (load − 1) · damageRate · dt
+> 1.2                 damage += (load − 1) · fastRate · dt
+load ≥ hardBreak(1.6) instant break
+damage ≥ 1            break
+```
+
+On break: member.broken = true, spawn debris piece (Opus A), record
+firstFailure if null, return/emit `'member:break' {id, x, y, mode, matId}`.
+Recommended: slenderness reduces effective compression limit
+(`limit / (1 + k·(len/refLen)²)`) so long unbraced beams buckle.
+
+## 6. Events (core/events.js) — canonical names
+
+```js
+import { on, off, emit } from '../core/events.js';
+```
+
+| event            | payload                                        | emitter |
+|------------------|------------------------------------------------|---------|
+| `member:break`   | `{id, x, y, mode, matId}`                      | stress  |
+| `water:impact`   | `{x, y, speed, magnitude}`                     | coupling|
+| `breach`         | `{x, y, flow}`                                 | coupling|
+| `overtop`        | `{x, flow}`                                    | coupling|
+| `sim:start` / `sim:reset` | `{}`                                  | game    |
+| `level:win` / `level:fail`| `{stats}` (fail adds `{cause}`)       | modes   |
+| `phase:change`   | `{phase}`                                      | game    |
+| `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` | | hud |
+| `input:down/move/up` | `{x, y, px, py, id}` (world + pixel)       | input   |
+| `input:pan` `{dx,dy}` px · `input:zoom` `{px,py,factor}` · `input:key` `{key}` | | input |
+
+Stats object (modes.js builds it; result screen shows it):
+
+```js
+{retained, peakDepth, maxLoad, brokenCount, cost, survivalTime, win, cause}
+```
+
+## 7. Game phases (core/game.js owns the machine)
+
+`title → levelselect → build → sim → result` (+ `paused`). Countdown mode:
+`build` runs with a live timer AND live water already flowing from far
+upstream (the flood is physically visible approaching); when it arrives the
+phase auto-switches to `sim` (building locks). Free build: `RELEASE WATER`
+button emits `ui:release`. Retry = re-instantiate structure from design +
+fresh water; must be near-instant.
+
+Game exposes to other modules (import `src/core/game.js`):
+
+```js
+game.getScene() => {phase, terrain, water, structure, design, level, camera,
+                    ghost, selection, simSpeed, buildTimer, stats}
+game.loadLevel(id) · game.release() · game.retry() · game.toEdit() ·
+game.setSpeed(v) · game.loadTestScene(i)  // physics test scenes 1–8
+```
+
+## 8. Level format (data in src/levels/levels.js, pure data)
+
+```js
+{
+  id: 'level-01', name: 'First Trickle', subtitle: '...',
+  mode: 'freebuild' | 'countdown',
+  countdown: 90,                     // seconds (countdown mode)
+  terrain: [[0,14],[20,6],...],      // y-up ground polyline
+  anchors: [[x,y],...],
+  buildZone: {x0, x1},               // building allowed only here (null = anywhere)
+  water: {
+    initial: [{x0, x1, surface}],    // pre-filled ponds
+    flood:  {x, rate, duration, delay},
+  },
+  budget: 12000,
+  materials: ['timber','steel','concrete','cable'],
+  objective: {type:'retain', minRetention:0.9, duration:45}
+           | {type:'survive', duration:60}
+           | {type:'protect', x0, x1, maxDepth:0.3, duration:60},
+  hints: ['...'],
+}
+```
+
+`levelLoader.load(spec)` returns `{terrain, waterSetup, level}` ready for game.
+
+## 9. Rendering contract (Opus C)
+
+```js
+renderer.render(ctx, camera, scene)        // terrain, anchors, buildZone, structure
+                                           // members colored by load (tension cool,
+                                           // compression warm, flashing >0.8, thickness
+                                           // + slight deform near failure), design ghosts
+waterRenderer.render(ctx, camera, water)   // smoothed surface, depth gradient, foam
+effects.step(dt) / effects.render(ctx, camera)  // spray, debris dust, cracks, camera shake (subtle)
+debug.toggle() / debug.render(ctx, camera, scene)  // F2: forces, stress numbers, blocked intervals, vel vectors, FPS
+```
+
+Camera (`core/camera.js`, Fable): `{x, y, zoom, worldToScreen(x,y)=>[px,py],
+screenToWorld(px,py)=>[x,y], pan(dxPx,dyPx), zoomAt(px,py,f), fit(terrain,canvas)}`.
+
+HUD/screens (Opus C) are DOM elements in index.html + styles.css; hud.js updates
+them from `game.getScene()` each frame and emits `ui:*` events. Mobile-first
+sizing (min 44px touch targets).
+
+## 10. Build interaction contract (Opus B)
+
+- Pointer down on empty/node + drag = ghost member; release = place (both nodes
+  created/merged via snapping). Right-click or eraser tool = delete member.
+  Tap node/member selects. `input:*` events carry world coords already.
+- Snapping: existing nodes (r≈0.6 m), anchors (r≈0.9), grid 0.5 m; max/min member
+  length by material; cost preview on ghost; invalid = red ghost (over budget,
+  too long, outside buildZone, inside terrain).
+- Keys: 1–4 materials, Space release/pause, R retry, Delete remove selection.
+- Budget: cost = Σ len·costPerMeter; builder refuses placement over budget.
+- modes.js runs objectives: track retention via `water.volumeBetween` +
+  `stats.totalIn`, protect-zone depth via `depthAt`, survival timer, and emits
+  `level:win`/`level:fail` once, with the stats object of §6.
+
+## 11. Config (src/config.js, Fable owns file; agents PROPOSE values)
+
+All tunables live in `CONFIG`: `physics{dt, substeps, iterations, gravity,
+groundFriction}`, `water{cellW, g, damping, maxVel, minDepth}`,
+`coupling{pressureScale, impactScale, dragScale, buoyancyScale}`,
+`damage{safe:0.8, damageRate, fastRate, hardBreak}`, `render{...}`,
+`debug{enabled}`. No magic numbers scattered in code — add to CONFIG.
+
+## 12. Test scenes (tests/, Opus A; also loadable in browser via game.loadTestScene)
+
+1 single beam under gravity · 2 triangle truss · 3 wall vs shallow water ·
+4 wall vs deep water (must load harder at bottom) · 5 hole in dam (leak jet) ·
+6 flood wave impact (moving water breaks what still water wouldn't) ·
+7 overtopping · 8 progressive collapse. `node tests/run.js` prints PASS/FAIL
+with numeric assertions (e.g. "deep water bottom-member load > 2× top-member").
+
+## 13. Priorities (when trading off)
+
+1. water↔structure interaction  2. structural failure  3. player understanding
+4. construction feel  5. water looks  6. performance (60fps target)  7. levels
+8. UI polish  9. audio (skip for v1).

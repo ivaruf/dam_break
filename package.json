@@ -1,0 +1,10 @@
+{
+  "name": "dam-builder",
+  "private": true,
+  "type": "module",
+  "description": "Browser physics game: build a dam, survive the flood. No build step — static files only.",
+  "scripts": {
+    "test": "node tests/run.js",
+    "serve": "python3 -m http.server 8000"
+  }
+}

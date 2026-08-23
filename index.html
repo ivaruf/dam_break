@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1b26">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>DAM BUILDER</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2 26h28v4H2z' fill='%235a6b78'/><path d='M12 6h8l3 20h-14z' fill='%23b9c4cc'/><path d='M3 20c4-3 8 3 12 0' stroke='%2335a7ff' stroke-width='3' fill='none'/></svg>">
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <!-- HUD (build + sim). ui/hud.js owns behavior; OPUS C owns markup below. -->
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <div id="hud-level"><span id="hud-level-name"></span><span id="hud-objective"></span></div>
+      <div id="hud-budget"><span id="budget-left"></span><span class="hud-label">BUDGET</span></div>
+      <div id="hud-timer" class="hidden"><span id="timer-text"></span><span class="hud-label">FLOOD</span></div>
+    </div>
+
+    <div id="toolbar">
+      <div id="material-bar"></div>
+      <button id="btn-erase" class="tool-btn" type="button" title="Erase (E)">⌫</button>
+      <button id="btn-undo" class="tool-btn" type="button" title="Undo (Z)">↶</button>
+    </div>
+
+    <div id="sim-controls" class="hidden">
+      <button class="speed-btn" data-speed="0" type="button">⏸</button>
+      <button class="speed-btn" data-speed="0.25" type="button">¼×</button>
+      <button class="speed-btn active" data-speed="1" type="button">1×</button>
+      <button class="speed-btn" data-speed="2" type="button">2×</button>
+      <button class="speed-btn" data-speed="4" type="button">4×</button>
+      <button id="btn-sim-retry" class="tool-btn" type="button" title="Retry (R)">↻</button>
+      <button id="btn-sim-edit" class="tool-btn" type="button" title="Edit dam">✎</button>
+    </div>
+
+    <button id="btn-release" class="big-btn release hidden" type="button">⚠ RELEASE WATER</button>
+    <button id="btn-hud-menu" class="tool-btn" type="button" title="Levels (Esc)">☰</button>
+    <div id="build-hint" class="hidden"></div>
+  </div>
+
+  <!-- Screens. OPUS C owns markup + screens.js behavior. -->
+  <div id="screen-title" class="screen">
+    <div class="logo">
+      <h1>DAM<span class="accent">BUILDER</span></h1>
+      <div class="logo-rule"></div>
+      <p class="tagline">When the water arrives — will your dam hold?</p>
+    </div>
+    <button class="big-btn pulse" id="btn-play" type="button">▶ PLAY</button>
+    <button class="small-btn" id="btn-sandbox" type="button">⚒ SANDBOX</button>
+    <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ UPDATE READY</button>
+    <p class="hint">Drag to build · pinch or wheel to zoom · Space to release the flood</p>
+    <span id="game-version" class="version-tag"></span>
+  </div>
+
+  <div id="screen-levels" class="screen hidden">
+    <h2>SELECT LEVEL</h2>
+    <div id="level-grid"></div>
+    <button class="small-btn" id="btn-levels-back" type="button">BACK</button>
+  </div>
+
+  <div id="screen-result" class="screen hidden">
+    <div class="end-card">
+      <h2 id="result-heading">DAM TEST COMPLETE</h2>
+      <p id="result-cause" class="tagline hidden"></p>
+      <div id="result-stats" class="end-stats"></div>
+      <div class="result-btns">
+        <button class="big-btn" id="btn-result-retry" type="button">↻ RETRY</button>
+        <button class="small-btn" id="btn-result-edit" type="button">✎ EDIT DAM</button>
+        <button class="small-btn" id="btn-result-next" type="button">NEXT LEVEL →</button>
+        <button class="small-btn" id="btn-result-menu" type="button">LEVELS</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
