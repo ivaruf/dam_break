@@ -7,20 +7,25 @@
 //   press + tap    → select the member under the finger (or clear the selection)
 //   right button   → delete the member under the cursor (mouse only)
 //   erase tool     → press/drag deletes every member the path touches
+//   boxdelete tool → press/drag draws a marquee; release deletes the whole
+//                    SECTION inside it as one undo step (a tap falls back to the
+//                    single-member erase, so the tool is never a dead zone)
 // After a placement the far endpoint becomes the "chain node": its snap radius
 // grows (CONFIG.build.chainSnapMul) so a quick follow-up drag continues the run.
 
 import { CONFIG } from '../config.js';
 import { on, emit } from '../core/events.js';
 import { getScene } from '../core/game.js';
-import { snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTol } from './snapping.js';
+import { snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect, hitTol } from './snapping.js';
 import { MATERIALS, MATERIAL_ORDER } from './materials.js';
 
 const B = {
   level: null, terrain: null, design: null,
   material: 'timber',
-  tool: 'build',          // build | erase
+  tool: 'build',          // build | erase | boxdelete
   ghost: null,            // {x0,y0,x1,y1, ok, cost, len, reason, mat, start, end}
+  marquee: null,          // {x0,y0,x1,y1} world rect, normalized — box-delete drag
+  marqueeHits: [],        // member ids the live marquee would delete
   drag: null,
   selection: null,        // member id | null  (renderer highlights it)
   hover: null,            // {x,y, snap} last hover/drag point — cosmetic only
@@ -70,6 +75,7 @@ export function startLevel(level, terrain, design) {
   B.material = pickDefaultMaterial(level);
   B.tool = 'build';
   B.ghost = null; B.drag = null; B.selection = null;
+  B.marquee = null; B.marqueeHits = [];
   B.hover = null; B.hoverMember = null;
   B.nextId = 1;
   B.undo = []; B.redo = [];
@@ -135,6 +141,7 @@ export function setMaterial(id) {
   if (!MATERIALS[id]) return;
   B.material = id;
   B.tool = 'build';            // picking a material always means "build"
+  dropMarquee();
   if (B.drag && B.drag.mode === 'build' && B.drag.moved && B.drag.last) updateGhost(B.drag.last);
 }
 
@@ -143,6 +150,13 @@ export function setTool(id, toggle) {
   const next = (toggle && id !== 'build' && B.tool === id) ? 'build' : id;
   B.tool = next;
   if (next !== 'build') B.ghost = null;
+  if (next !== 'boxdelete') dropMarquee();   // disarming mid-drag deletes nothing
+}
+
+// Abandon an in-flight marquee (tool switched away under the finger).
+function dropMarquee() {
+  if (B.drag && B.drag.mode === 'boxdelete') cancelDrag();
+  else clearMarquee();
 }
 
 // ---- undo / redo ----------------------------------------------------------
@@ -263,8 +277,32 @@ export function deleteMember(id) {
   B.design.members.splice(i, 1);
   if (B.selection === id) B.selection = null;
   cleanupOrphans();
-  emit('design:change', { action: 'delete', id });
+  emit('design:change', { action: 'delete', id, count: 1 });
   return true;
+}
+
+// Delete a whole set of members as ONE edit: one undo step, one orphan sweep,
+// one 'design:change'. The box-delete tool's release goes through here, and a
+// section coming back on a single undo is the whole point of the tool.
+// Returns the number actually removed (ids may be stale by now).
+export function deleteMembers(ids) {
+  if (!B.design || !ids || !ids.length) return 0;
+  const want = new Set(ids);
+  const members = B.design.members;
+  const gone = [];
+  for (let i = members.length - 1; i >= 0; i--) {
+    if (want.has(members[i].id)) gone.push(members[i].id);
+  }
+  if (!gone.length) return 0;
+
+  pushUndo();
+  for (let i = members.length - 1; i >= 0; i--) {
+    if (want.has(members[i].id)) members.splice(i, 1);
+  }
+  if (B.selection && want.has(B.selection)) B.selection = null;
+  cleanupOrphans();
+  emit('design:change', { action: 'delete', id: null, count: gone.length });
+  return gone.length;
 }
 
 export function deleteSelection() {
@@ -287,6 +325,7 @@ function cancelDrag() {
   const wasDrag = B.drag;
   B.drag = null;
   B.ghost = null;
+  clearMarquee();
   if (wasDrag && B.design) cleanupOrphans();
 }
 
@@ -304,19 +343,22 @@ function onDown(p) {
   }
 
   const eraser = B.tool === 'erase';
-  const start = eraser ? null
+  const box = B.tool === 'boxdelete';
+  const start = (eraser || box) ? null
     : snapPoint(p.x, p.y, B.design, B.terrain, { chainNodeId: B.chainNodeId });
 
   B.drag = {
-    mode: eraser ? 'erase' : 'build',
+    mode: box ? 'boxdelete' : eraser ? 'erase' : 'build',
     start,
     px0: p.px, py0: p.py, t0: now(),
     lx: p.x, ly: p.y,
+    x0: p.x, y0: p.y,        // marquee origin (box-delete)
     last: start,
     snapped: false,
     moved: false,
   };
   B.ghost = null;
+  clearMarquee();            // the box only exists once the drag passes dragMinPx
 
   if (eraser) eraseAt(p.x, p.y);
 }
@@ -328,7 +370,8 @@ function onMove(p) {
   if (!B.drag) {                                  // hover (mouse only, cosmetic)
     if (p.hover) {
       B.hover = { x: p.x, y: p.y, snap: snapPoint(p.x, p.y, B.design, B.terrain, { chainNodeId: B.chainNodeId }) };
-      B.hoverMember = hitTestMember(p.x, p.y, B.design, tolerance(B.tool === 'erase' ? CONFIG.build.eraseTolMul : 1));
+      const del = B.tool === 'erase' || B.tool === 'boxdelete';
+      B.hoverMember = hitTestMember(p.x, p.y, B.design, tolerance(del ? CONFIG.build.eraseTolMul : 1));
     }
     return;
   }
@@ -341,6 +384,14 @@ function onMove(p) {
   if (B.drag.mode === 'erase') {
     eraseAlong(B.drag.lx, B.drag.ly, p.x, p.y);
     B.drag.lx = p.x; B.drag.ly = p.y;
+    return;
+  }
+
+  if (B.drag.mode === 'boxdelete') {
+    // nothing is deleted while dragging: the marquee + its hit list ARE the
+    // preview, and the whole section goes on release
+    if (B.drag.moved) setMarquee(B.drag.x0, B.drag.y0, p.x, p.y);
+    else clearMarquee();
     return;
   }
 
@@ -358,9 +409,22 @@ function onUp(p) {
   const ghost = B.ghost;
   B.drag = null;
   B.ghost = null;
-  if (!drag || drag.mode === 'dead' || !B.design) { if (drag) cleanupOrphans(); return; }
+  if (!drag || drag.mode === 'dead' || !B.design) { clearMarquee(); if (drag) cleanupOrphans(); return; }
 
   if (drag.mode === 'erase') { cleanupOrphans(); return; }
+
+  if (drag.mode === 'boxdelete') {
+    const hits = B.marqueeHits;
+    const boxed = !!B.marquee;
+    clearMarquee();
+    if (p.cancel) { cleanupOrphans(); return; }   // pinch-cancel: nothing dies
+    const travelBox = Math.hypot(p.px - drag.px0, p.py - drag.py0);
+    if (boxed && travelBox >= CONFIG.build.dragMinPx) deleteMembers(hits);
+    else eraseAt(p.x, p.y);                       // tap = single-member erase
+    cleanupOrphans();
+    return;
+  }
+
   if (p.cancel) { cleanupOrphans(); return; }     // pinch-cancel: never place
 
   const cfg = CONFIG.build;
@@ -415,6 +479,27 @@ function eraseAlong(x0, y0, x1, y1) {
   eraseIds(ids);
 }
 
+// ---- box delete (section marquee) -----------------------------------------
+
+// Live preview: a normalized world rect plus the ids it would take. Recomputed
+// from scratch every move — the design can change under it (undo, a key delete)
+// and a stale hit list would delete the wrong section on release.
+function setMarquee(ax, ay, bx, by) {
+  B.marquee = {
+    x0: Math.min(ax, bx), y0: Math.min(ay, by),
+    x1: Math.max(ax, bx), y1: Math.max(ay, by),
+  };
+  B.marqueeHits = hitTestMembersInRect(
+    B.marquee.x0, B.marquee.y0, B.marquee.x1, B.marquee.y1,
+    B.design, CONFIG.build.marqueeHitPad,
+  );
+}
+
+function clearMarquee() {
+  B.marquee = null;
+  if (B.marqueeHits.length) B.marqueeHits = [];
+}
+
 // ---- keyboard -------------------------------------------------------------
 
 function onKey({ key }) {
@@ -427,6 +512,11 @@ function onKey({ key }) {
 
   switch (key) {
     case 'e': case 'E': setTool(B.tool === 'erase' ? 'build' : 'erase'); break;
+    // X toggles the section box. Escape is deliberately NOT bound here: game.js
+    // already leaves the level on Escape from the build phase, and the
+    // phase:change that follows cancels the drag (marquee discarded, nothing
+    // deleted). Two meanings on one key would be worse than none.
+    case 'x': case 'X': setTool(B.tool === 'boxdelete' ? 'build' : 'boxdelete'); break;
     case 'b': case 'B': setTool('build'); break;
     case 'z': undo(); break;
     case 'Z': redo(); break;

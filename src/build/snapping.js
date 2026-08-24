@@ -40,6 +40,25 @@ export function segSegDistance(ax, ay, bx, by, cx, cy, dx, dy) {
   );
 }
 
+// Distance between segment AB and the axis-aligned rect (x0,y0)-(x1,y1), 0 when
+// the segment touches, crosses or lies inside it. The corners are the reason the
+// four-edge minimum is not enough on its own: a member wholly INSIDE the box
+// crosses no edge, so an endpoint-inside test has to come first.
+// A degenerate rect (zero width and/or height) collapses to the point/segment
+// distance, which is exactly what a marquee that has not moved yet should mean.
+export function segRectDistance(ax, ay, bx, by, x0, y0, x1, y1) {
+  const rx0 = Math.min(x0, x1), rx1 = Math.max(x0, x1);
+  const ry0 = Math.min(y0, y1), ry1 = Math.max(y0, y1);
+  const inside = (px, py) => px >= rx0 && px <= rx1 && py >= ry0 && py <= ry1;
+  if (inside(ax, ay) || inside(bx, by)) return 0;
+  return Math.min(
+    segSegDistance(ax, ay, bx, by, rx0, ry0, rx1, ry0),
+    segSegDistance(ax, ay, bx, by, rx1, ry0, rx1, ry1),
+    segSegDistance(ax, ay, bx, by, rx1, ry1, rx0, ry1),
+    segSegDistance(ax, ay, bx, by, rx0, ry1, rx0, ry0),
+  );
+}
+
 // Screen-px hit radius → world metres, clamped so it stays usable at any zoom.
 export function hitTol(zoom) {
   const b = CONFIG.build;
@@ -152,6 +171,24 @@ export function hitTestMembersAlong(x0, y0, x1, y1, design, tol) {
     const mat = MATERIALS[m.mat];
     const t = tol + (mat ? mat.thickness * 0.5 : 0);
     if (segSegDistance(x0, y0, x1, y1, a.x, a.y, b.x, b.y) <= t) out.push(m.id);
+  }
+  return out;
+}
+
+// All member ids the marquee rect (x0,y0)-(x1,y1) touches — the box-delete
+// tool's selection. `pad` is added to half the member thickness, so the test is
+// against the member as drawn (CONFIG.build.marqueeHitPad). Order follows
+// design.members, so the returned list is deterministic.
+export function hitTestMembersInRect(x0, y0, x1, y1, design, pad) {
+  const out = [];
+  if (!design) return out;
+  const byId = nodeMap(design);
+  for (const m of design.members) {
+    const a = byId.get(m.a), b = byId.get(m.b);
+    if (!a || !b) continue;
+    const mat = MATERIALS[m.mat];
+    const t = (pad || 0) + (mat ? mat.thickness * 0.5 : 0);
+    if (segRectDistance(a.x, a.y, b.x, b.y, x0, y0, x1, y1) <= t) out.push(m.id);
   }
   return out;
 }

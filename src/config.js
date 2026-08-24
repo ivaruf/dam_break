@@ -253,6 +253,16 @@ export const CONFIG = {
     hitMinWorld: 0.16,     // clamp on the hit radius (m)
     hitMaxWorld: 1.2,
     eraseTolMul: 1.35,     // eraser is more forgiving than selection
+
+    // --- box-delete tool (marquee section erase, OPUS B) ---
+    // Drag a box, everything it touches highlights, release deletes the lot as
+    // ONE undo step. A member counts when its SEGMENT comes within
+    // marqueeHitPad + thickness/2 of the rect, so the test is about the member
+    // as DRAWN: fat concrete grazing the edge of the box is inside it, and a
+    // hairline cable just outside is not. World metres, not screen px — the
+    // marquee is a world-space rectangle and must select the same members at
+    // every zoom.
+    marqueeHitPad: 0.06,   // m of slack beyond half the member thickness
     undoDepth: 40,         // snapshot undo steps kept
     hintMs: 2200,          // how long a refusal reason stays on the HUD hint
 

@@ -6,7 +6,10 @@
 import { CONFIG } from '../src/config.js';
 import { emit, on } from '../src/core/events.js';
 import { createTerrain } from '../src/core/terrain.js';
-import { snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTol } from '../src/build/snapping.js';
+import {
+  snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect,
+  segRectDistance, hitTol,
+} from '../src/build/snapping.js';
 import { MATERIALS } from '../src/build/materials.js';
 import * as builder from '../src/build/builder.js';
 import * as modes from '../src/build/modes.js';
@@ -621,6 +624,405 @@ try {
   S.phase = 'build';
 } catch (err) {
   console.log('  SKIP  physics modules unavailable or throwing: ' + err.message);
+}
+
+// ------------------------------------------- 8. box delete (section erase) --
+// The 'boxdelete' tool: drag a marquee, everything it touches highlights,
+// release deletes the whole section as ONE undo step. A tap falls back to the
+// single-member erase so the tool is never a dead zone.
+
+section('8. BOX DELETE — SECTION MARQUEE');
+{
+  // ---- pure geometry -----------------------------------------------------
+  const PAD = CONFIG.build.marqueeHitPad;
+  const geo = {
+    nodes: [
+      { id: 'n1', x: 10, y: 0, anchorId: null }, { id: 'n2', x: 10, y: 4, anchorId: null },
+      { id: 'n3', x: 20, y: 0, anchorId: null }, { id: 'n4', x: 20, y: 4, anchorId: null },
+      { id: 'n5', x: 0, y: 8, anchorId: null }, { id: 'n6', x: 30, y: 8, anchorId: null },
+    ],
+    members: [
+      { id: 'mA', a: 'n1', b: 'n2', mat: 'timber' },    // vertical at x = 10, fat
+      { id: 'mB', a: 'n3', b: 'n4', mat: 'cable' },     // vertical at x = 20, hairline
+      { id: 'mC', a: 'n5', b: 'n6', mat: 'timber' },    // long horizontal at y = 8
+      { id: 'mD', a: 'gone', b: 'n2', mat: 'timber' },  // dangling — must be ignored
+    ],
+  };
+  const inRect = (x0, y0, x1, y1) => hitTestMembersInRect(x0, y0, x1, y1, geo, PAD).join(',');
+
+  eq(segRectDistance(10, 1, 10, 2, 9, 0, 11, 3), 0, 'a segment inside the rect is at distance 0');
+  eq(segRectDistance(9, 1, 12, 1, 9.5, 0, 11, 3), 0, 'a segment crossing the rect is at distance 0');
+  near(segRectDistance(0, 0, 1, 0, 5, 5, 6, 6), Math.hypot(4, 5), 1e-9,
+    'a segment clear of the rect measures to the nearest corner');
+
+  eq(inRect(9, -1, 11, 5), 'mA', 'a member wholly inside the box is selected');
+  eq(inRect(8, 1, 12, 2), 'mA', 'a member crossing the box edges is selected');
+  eq(inRect(11, 1, 13, 2), '', 'a member clear of the box is not selected');
+  eq(inRect(10.2, 1, 12, 2), 'mA', 'a fat member grazing the edge counts (thickness/2 + pad)');
+  eq(inRect(10.3, 1, 12, 2), '', 'just past thickness/2 + pad the fat member is out');
+  eq(inRect(20.2, 1, 22, 2), '', 'a hairline cable at the same 0.2 m offset stays out');
+  eq(inRect(11, 5, 9, -1), 'mA', 'the rect test is orientation-independent');
+  eq(inRect(10.1, 2, 10.1, 2), 'mA', 'a zero-area marquee degrades to a point test');
+  eq(inRect(12, 7, 18, 9), 'mC', 'a long member counts when any part of it crosses the box');
+  eq(inRect(-1, -1, 31, 9), 'mA,mB,mC', 'a box over everything selects every member, in design order');
+  ok(!inRect(-1, -1, 31, 9).includes('mD'), 'a member with a missing node is never selected');
+
+  // ---- the tool, through the real pointer flow ----------------------------
+  const S = getScene();
+  const design = emptyDesign();
+  const L = level();
+  S.phase = 'build'; S.level = L; S.terrain = TERRAIN; S.design = design;
+  S.camera = { zoom: 14 };
+  S.structure = null; S.water = null; S.simTime = 0;
+  builder.startLevel(L, TERRAIN, design);
+  const B = builder.getBuilder();
+
+  const Z = 14;
+  const px = (x) => x * Z, py = (y) => -y * Z;
+  const down = (x, y, button) =>
+    emit('input:down', { x, y, px: px(x), py: py(y), id: 1, button: button || 0, cancel: false });
+  const move = (x, y) =>
+    emit('input:move', { x, y, px: px(x), py: py(y), id: 1, button: 0, cancel: false, hover: false });
+  const up = (x, y, cancel) =>
+    emit('input:up', { x, y, px: px(x), py: py(y), id: 1, button: 0, cancel: !!cancel });
+  const tap = (x, y) => { down(x, y); up(x, y); };
+  const put = (x0, y0, x1, y1) => { down(x0, y0); move(x1, y1); up(x1, y1); };
+  const arm = () => { if (B.tool !== 'boxdelete') emit('ui:tool', { id: 'boxdelete' }); };
+  const disarm = () => emit('ui:tool', { id: 'build' });
+
+  // drag a marquee and report the state seen mid-gesture (the UI renders this)
+  function boxDrag(x0, y0, x1, y1, opts) {
+    const o = opts || {};
+    down(x0, y0);
+    move(x1, y1);
+    const live = { rect: B.marquee ? { ...B.marquee } : null, hits: B.marqueeHits.slice() };
+    up(x1, y1, o.cancel);
+    return live;
+  }
+
+  // ---- activation / toggling ---------------------------------------------
+  emit('ui:tool', { id: 'boxdelete' });
+  eq(B.tool, 'boxdelete', 'ui:tool {id:boxdelete} arms the section box');
+  emit('ui:tool', { id: 'boxdelete' });
+  eq(B.tool, 'build', 're-sending boxdelete toggles it back to build');
+  emit('input:key', { key: 'x' });
+  eq(B.tool, 'boxdelete', 'key X arms the section box');
+  emit('input:key', { key: 'x' });
+  eq(B.tool, 'build', 'key X toggles it off again');
+  emit('input:key', { key: 'X' });
+  eq(B.tool, 'boxdelete', 'shift-X arms it too');
+  emit('ui:tool', { id: 'erase' });
+  eq(B.tool, 'erase', 'the single-member eraser replaces the box tool');
+  emit('input:key', { key: 'x' });
+  eq(B.tool, 'boxdelete', 'X switches straight from the eraser to the box');
+  emit('ui:material', { id: 'timber' });
+  eq(B.tool, 'build', 'picking a material drops the box tool for build');
+  eq(B.marquee, null, 'no marquee while nothing is being dragged');
+  eq(B.marqueeHits.length, 0, 'no marquee hits while nothing is being dragged');
+
+  // ---- four uprights, 2.5 m apart ----------------------------------------
+  design.nodes.length = 0; design.members.length = 0;
+  builder.startLevel(L, TERRAIN, design);
+  put(25, 4, 25, 7); put(27.5, 4, 27.5, 7); put(30, 4, 30, 7); put(32.5, 4, 32.5, 7);
+  const ids = design.members.map((m) => m.id);
+  eq(design.members.length, 4, 'setup: four uprights placed for the section tests');
+  eq(design.nodes.length, 8, 'setup: eight nodes');
+  near(builder.designCost(design), 4 * 3 * MATERIALS.timber.costPerMeter, 1e-6,
+    'setup: the four 3 m timber uprights cost 180');
+
+  let changes = [];
+  const offChange = on('design:change', (e) => changes.push(e));
+
+  // ---- the marquee itself -------------------------------------------------
+  arm();
+  changes = [];
+  const live = boxDrag(28.5, 7.5, 24.5, 3.5);          // dragged up-left on purpose
+  ok(live.rect !== null, 'dragging with the tool armed produces a live marquee');
+  near(live.rect.x0, 24.5, 1e-9, 'the marquee normalizes x0 <= x1');
+  near(live.rect.y0, 3.5, 1e-9, 'the marquee normalizes y0 <= y1');
+  near(live.rect.x1, 28.5, 1e-9, 'marquee x1 is the larger x');
+  near(live.rect.y1, 7.5, 1e-9, 'marquee y1 is the larger y');
+  eq(live.hits.length, 2, 'the live hit list holds the members inside the box');
+  ok(live.hits.includes(ids[0]) && live.hits.includes(ids[1]),
+    'the hits are exactly the two uprights inside the box');
+  eq(design.members.length, 2, 'release deletes the whole boxed section');
+  eq(design.nodes.length, 4, 'the section takes its nodes with it (orphan cleanup)');
+  eq(B.marquee, null, 'the marquee is cleared on release');
+  eq(B.marqueeHits.length, 0, 'the hit list is cleared on release');
+  eq(changes.length, 1, 'a section delete emits exactly ONE design:change');
+  eq(changes[0].action, 'delete', 'the event action is delete');
+  eq(changes[0].id, null, 'a section delete carries id null');
+  eq(changes[0].count, 2, 'the event counts the members that went');
+  near(builder.designCost(design), 2 * 3 * MATERIALS.timber.costPerMeter, 1e-6,
+    'the deleted section stops costing anything');
+  near(builder.budgetLeft(), L.budget - 90, 1e-6, 'the budget is refunded for the whole section');
+
+  // ---- one undo step ------------------------------------------------------
+  ok(builder.undo(), 'undo after a section delete succeeds');
+  eq(design.members.length, 4, 'ONE undo restores the entire section');
+  eq(design.nodes.length, 8, 'and all of its nodes');
+  ok(builder.redo(), 'redo after that undo succeeds');
+  eq(design.members.length, 2, 'redo re-deletes the whole section at once');
+  builder.undo();
+  eq(design.members.length, 4, 'back to four uprights');
+
+  // ---- members crossing the box edge -------------------------------------
+  arm();
+  const band = boxDrag(26.5, 5, 31, 5.5);              // thin band across mid-span
+  eq(band.hits.length, 2, 'a thin band crossing two members selects both');
+  eq(design.members.length, 2, 'and takes exactly those two');
+  ok(design.members.every((m) => m.id !== ids[1] && m.id !== ids[2]),
+    'the two crossed uprights are the ones that died');
+  builder.undo();
+
+  // ---- selection ----------------------------------------------------------
+  disarm();
+  tap(25, 5.5);
+  eq(builder.getSelection(), ids[0], 'setup: the first upright is selected');
+  arm();
+  boxDrag(24, 3.5, 26, 7.5);
+  eq(design.members.length, 3, 'the box took the selected upright');
+  eq(builder.getSelection(), null, 'the selection is cleared when its member is boxed away');
+  builder.undo();
+
+  disarm();
+  tap(32.5, 5.5);
+  eq(builder.getSelection(), ids[3], 'setup: the last upright is selected');
+  arm();
+  boxDrag(24, 3.5, 26, 7.5);
+  eq(builder.getSelection(), ids[3], 'a section delete elsewhere leaves the selection alone');
+  builder.undo();
+
+  // ---- pinch-cancel -------------------------------------------------------
+  arm();
+  const n0 = design.members.length;
+  const cancelled = boxDrag(24, 3.5, 33, 7.5, { cancel: true });
+  eq(cancelled.hits.length, 4, 'the cancelled marquee had previewed all four uprights');
+  eq(design.members.length, n0, 'a pinch-cancelled marquee deletes nothing');
+  eq(B.marquee, null, 'a cancelled marquee is cleared');
+
+  // ---- tap with the tool armed = single-member erase ----------------------
+  arm();
+  changes = [];
+  const m0 = design.members.length;
+  tap(27.5, 5.5);
+  eq(design.members.length, m0 - 1, 'a tap with the box tool erases the member under it');
+  eq(changes.length, 1, 'the tap erase emits one design:change');
+  eq(changes[0].id, ids[1], 'the tap erase names the single member it took');
+  ok(builder.undo(), 'the tap erase is one undo step');
+  eq(design.members.length, m0, 'the tapped member comes back');
+
+  arm();
+  changes = [];
+  tap(34, 12);
+  eq(design.members.length, m0, 'a tap on empty space with the box tool deletes nothing');
+  eq(changes.length, 0, 'and emits nothing');
+
+  // ---- an empty box -------------------------------------------------------
+  arm();
+  changes = [];
+  const emptyBox = boxDrag(34.5, 9, 36, 11);
+  eq(emptyBox.hits.length, 0, 'a box over empty space selects nothing');
+  eq(design.members.length, m0, 'and deletes nothing');
+  eq(changes.length, 0, 'and emits no design:change');
+
+  // ---- the box is abandoned when the tool goes away under the finger ------
+  arm();
+  down(24, 3.5); move(33, 7.5);
+  ok(B.marquee !== null, 'setup: a live marquee is up');
+  disarm();
+  eq(B.marquee, null, 'switching tools mid-drag drops the marquee');
+  up(33, 7.5);
+  eq(design.members.length, m0, 'and the release deletes nothing');
+
+  arm();
+  down(24, 3.5); move(33, 7.5);
+  emit('ui:material', { id: 'steel' });
+  eq(B.marquee, null, 'picking a material mid-marquee drops it too');
+  eq(B.tool, 'build', 'the material pick left the build tool armed');
+  up(33, 7.5);
+  eq(design.members.length, m0, 'that release deletes nothing either');
+  emit('ui:material', { id: 'timber' });
+
+  // Escape is game.js's "leave the level": it is NOT bound in the builder, and
+  // the phase:change it causes is what discards the marquee.
+  arm();
+  down(24, 3.5); move(33, 7.5);
+  ok(B.marquee !== null, 'setup: a live marquee is up again');
+  emit('phase:change', { phase: 'levelselect' });
+  eq(B.marquee, null, 'leaving the build phase (Escape) discards the marquee');
+  S.phase = 'levelselect';
+  up(33, 7.5);
+  eq(design.members.length, m0, 'Escape deletes nothing');
+  S.phase = 'build';
+
+  // ---- phase gate ---------------------------------------------------------
+  arm();
+  S.phase = 'sim';
+  boxDrag(24, 3.5, 33, 7.5);
+  eq(design.members.length, m0, 'the box tool does nothing outside the build phase');
+  eq(B.marquee, null, 'and leaves no marquee behind');
+  S.phase = 'build';
+  disarm();
+  offChange();
+}
+
+// ------------------------------------------------------- 9. editing fuzz ----
+// Deterministic pointer fuzz over the WHOLE editing surface (place, erase,
+// box-delete, select, right-click, key delete, undo/redo, clear, tool and
+// material switches, pinch-cancels, and gestures interrupted mid-drag). The
+// point is not any single action but that the seven structural invariants below
+// survive every interleaving of them.
+
+section('9. FUZZ — EDITING INVARIANTS');
+{
+  const S = getScene();
+  const L = level({ budget: 2000 });
+  const design = emptyDesign();
+  S.phase = 'build'; S.level = L; S.terrain = TERRAIN; S.design = design;
+  S.camera = { zoom: 14 };
+  S.structure = null; S.water = null; S.simTime = 0;
+  const B = builder.getBuilder();
+
+  const Z = 14;
+  const px = (x) => x * Z, py = (y) => -y * Z;
+  const down = (x, y, button) =>
+    emit('input:down', { x, y, px: px(x), py: py(y), id: 1, button: button || 0, cancel: false });
+  const move = (x, y) =>
+    emit('input:move', { x, y, px: px(x), py: py(y), id: 1, button: 0, cancel: false, hover: false });
+  const up = (x, y, cancel, button) =>
+    emit('input:up', { x, y, px: px(x), py: py(y), id: 1, button: button || 0, cancel: !!cancel });
+
+  // mulberry32: same seeds → same run, forever
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const INV = [
+    'every member points at two live nodes',
+    'no orphan node survives a completed gesture',
+    'node and member ids stay unique',
+    'the selection is null or a live member',
+    'the design never costs more than the budget',
+    'every node coordinate stays finite',
+    'the marquee is null and empty whenever no drag is live',
+  ];
+  const viol = INV.map(() => 0);
+  const witness = INV.map(() => '');
+
+  function check(where) {
+    const nodeIds = new Set(design.nodes.map((n) => n.id));
+    const bad = [
+      design.members.some((m) => !nodeIds.has(m.a) || !nodeIds.has(m.b)),
+      design.nodes.some((n) => !design.members.some((m) => m.a === n.id || m.b === n.id)),
+      nodeIds.size !== design.nodes.length ||
+        new Set(design.members.map((m) => m.id)).size !== design.members.length,
+      !!B.selection && !design.members.some((m) => m.id === B.selection),
+      builder.designCost(design) > L.budget + CONFIG.build.budgetEps,
+      design.nodes.some((n) => !Number.isFinite(n.x) || !Number.isFinite(n.y)),
+      !!B.marquee || B.marqueeHits.length > 0,
+    ];
+    for (let i = 0; i < bad.length; i++) {
+      if (bad[i]) { viol[i]++; if (!witness[i]) witness[i] = where; }
+    }
+  }
+
+  let boxDeleted = 0, singleDeleted = 0, placed = 0;
+  const offChange = on('design:change', (e) => {
+    if (e.action === 'place') placed++;
+    else if (e.id === null) boxDeleted += e.count || 0;
+    else singleDeleted++;
+  });
+
+  const SEEDS = [1, 7, 1337, 90210];
+  const ACTIONS = 260;
+  for (const seed of SEEDS) {
+    const r = rng(seed);
+    const X = () => 23 + r() * 12;          // straddles the 24..34 build zone
+    const Y = () => 3 + r() * 6;
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+
+    for (let step = 0; step < ACTIONS; step++) {
+      const pick = r();
+      const where = `seed ${seed} step ${step}`;
+
+      if (pick < 0.30) {                    // place a member
+        const x0 = X(), y0 = Y();
+        down(x0, y0); move(x0 + (r() - 0.5) * 6, y0 + (r() - 0.5) * 6);
+        const x1 = x0 + (r() - 0.5) * 6, y1 = y0 + (r() - 0.5) * 6;
+        move(x1, y1); up(x1, y1, r() < 0.08);
+      } else if (pick < 0.42) {             // box-delete drag
+        builder.setTool('boxdelete');
+        const x0 = X(), y0 = Y(), x1 = X(), y1 = Y();
+        down(x0, y0); move((x0 + x1) / 2, (y0 + y1) / 2); move(x1, y1);
+        up(x1, y1, r() < 0.15);
+        builder.setTool('build');
+      } else if (pick < 0.50) {             // box-delete tap (single erase)
+        builder.setTool('boxdelete');
+        const x = X(), y = Y();
+        down(x, y); up(x, y);
+        builder.setTool('build');
+      } else if (pick < 0.56) {             // marquee abandoned mid-drag
+        builder.setTool('boxdelete');
+        const x0 = X(), y0 = Y();
+        down(x0, y0); move(X(), Y());
+        if (r() < 0.5) emit('input:key', { key: 'x' });
+        else emit('input:key', { key: 'Delete' });
+        const x1 = X(), y1 = Y();
+        up(x1, y1);
+        builder.setTool('build');
+      } else if (pick < 0.64) {             // eraser drag
+        builder.setTool('erase');
+        const x0 = X(), y0 = Y(), x1 = X(), y1 = Y();
+        down(x0, y0); move(x1, y1); up(x1, y1);
+        builder.setTool('build');
+      } else if (pick < 0.72) {             // tap: select / clear
+        const x = X(), y = Y();
+        down(x, y); up(x, y);
+      } else if (pick < 0.78) {             // right-click delete
+        const x = X(), y = Y();
+        down(x, y, 2); up(x, y, false, 2);
+      } else if (pick < 0.84) {             // key delete of the selection
+        emit('input:key', { key: r() < 0.5 ? 'Delete' : 'Backspace' });
+      } else if (pick < 0.92) {             // undo / redo
+        emit('input:key', { key: r() < 0.6 ? 'z' : 'Z' });
+      } else if (pick < 0.95) {             // clear everything
+        builder.clearDesign();
+      } else {                              // tool / material churn
+        const keys = ['x', 'e', 'b', '1', '2', '3', '4', 'X', 'E'];
+        emit('input:key', { key: keys[Math.floor(r() * keys.length)] });
+        builder.setTool('build');
+      }
+
+      check(where);
+    }
+
+    // unwinding the whole history must stay just as clean
+    let guard = 0;
+    while (builder.undo() && guard++ < 500) check(`seed ${seed} undo`);
+    check(`seed ${seed} fully undone`);
+    while (builder.redo() && guard++ < 1000) check(`seed ${seed} redo`);
+  }
+  offChange();
+  builder.setTool('build');
+
+  const runs = SEEDS.length * ACTIONS;
+  for (let i = 0; i < INV.length; i++) {
+    ok(viol[i] === 0, `fuzz invariant ${i + 1}: ${INV[i]}`,
+      `${viol[i]} violations (first at ${witness[i]})`);
+  }
+  ok(boxDeleted > 0 && singleDeleted > 0 && placed > 0,
+    `the fuzz actually exercised the editor (${placed} placed, ${boxDeleted} boxed away, ` +
+    `${singleDeleted} erased singly over ${runs} actions across ${SEEDS.length} seeds)`);
+  ok(builder.canUndo() || builder.canRedo() || design.members.length === 0,
+    'the fuzz leaves a coherent history');
 }
 
 // ---------------------------------------------------------------- summary --
