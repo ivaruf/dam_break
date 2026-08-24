@@ -1,4 +1,4 @@
-// DAM BUILDER — central tunables. FABLE owns this file; agents propose values.
+// DAM BREAK — central tunables. FABLE owns this file; agents propose values.
 // No magic numbers in module code: if you need a knob, add it here.
 
 export const CONFIG = {
@@ -605,6 +605,179 @@ export const CONFIG = {
     timerUrgent: 10,                    // s remaining where the timer goes urgent
     toastMs: 1600,
     stressBarWarn: 0.8,
+
+    // ---- TITLE DIORAMA (src/ui/titleScene.js) ---------------------------
+    // The menu backdrop is not a decoration: it is the real engine running a
+    // scripted valley — same terrain/fluid/coupling/solver/damage pipeline the
+    // game uses — on its own read-only instances. Everything the loop does is a
+    // consequence of these numbers, so this block IS the storyboard.
+    //
+    // The whole design rests on one relation from the damage model:
+    //   bendLoad ≈ 0.034 · L² · (2H − L)      (L = face bay, H = head, timber)
+    // At L = 2.25 m and a full head H = 4.5 m that is ≈ 1.16 — just past the
+    // limit, which is exactly "JUST weak enough": the face spends the fill
+    // climbing through the creep band (0.7+) where the amber halo and the
+    // lateral bow live, tops out slightly overloaded, and then dies of
+    // accumulated damage a few seconds later instead of snapping the instant
+    // the water arrives. Lengthen the bay or raise the crest and it fails
+    // during the fill; shorten either and it never fails at all.
+    title: {
+      enabled: true,
+      levelId: 'title-diorama',     // renderer caches hills/strata under this id
+
+      // ---- timing (SIM seconds; the whole loop is a function of these) ----
+      // MEASURED storyboard at these numbers — printed by
+      // `node tests/ui-title.mjs --timeline`, and gated by its assertions:
+      //   0.0–1.2   a calm pond (surface 7.4) against a whole dam, face at 0.3
+      //   1.2–5.0   the river appears down the left wall and runs at the dam
+      //   5.0–6.5   the front arrives: surface 7.8 → 8.7, and the face goes from
+      //             load 0.32 to 1.02 in a second and a half
+      //   6.5–14.1  the long phase, and the one that matters. The reservoir works
+      //             between 8.9 and 9.8 against a 10.1 m crest and slops over it
+      //             in bursts (33 `overtop` events). The face sits at 0.96–1.17:
+      //             bowing along the water force, amber creep halo up, crack
+      //             ticks growing, damage 0.06 → 0.93 — visibly dying, and still
+      //             holding. This is what "about to fail" looks like.
+      //   14.15     the bottom face bay snaps in BENDING at load 1.23
+      //   14.75+    the bottom brace (2.55) and the lower tie (2.15) go with it;
+      //             the upper brace follows at 16.4. Four of eight members gone.
+      //   14–19     the reservoir tears out through the hole, 9.7 → 8.3, and
+      //             washes the wreck downstream past the sign, the stand of
+      //             trees and the house
+      //   18.9–20   the cut
+      // The tail is short on purpose. Left running to 24 s the downstream plain
+      // fills, the two water bodies merge, and the last third of the loop is a
+      // lake with no dam in it — which is the one thing the title screen must
+      // never be showing.
+      loop: 20,                     // s per cycle, then everything is rebuilt
+      timeScale: 1,                 // sim seconds per real second
+      maxCatchUp: 0.05,             // s of accumulator kept. Deliberately UNDER
+                                    // two ticks: coming back to the menu after
+                                    // a level must not fast-forward a burst of
+                                    // physics, and a slow frame should slow the
+                                    // diorama down rather than stutter it.
+      maxTicks: 2,                  // hard cap on physics ticks per frame
+      fadeIn: 0.55,                 // s of black at the top of the loop
+      fadeOut: 1.1,                 // s of black at the end — the cut that hides
+                                    // the reservoir refilling in one frame
+
+      // ---- the valley ----
+      // Three decisions here are all about the FRAME, not the geography:
+      //
+      // 1. The left wall tops out at 12.2 m, not 18. The fluid grid adds
+      //    CONFIG.fluid.yHead (9 m) of splash room above the HIGHEST terrain
+      //    point, so a decorative peak costs real pressure-solve cells.
+      // 2. The downstream side is a floodplain at ~4.2 m, not a gorge down to
+      //    zero. A 9 m drop behind the dam cannot be in shot at the same time as
+      //    a reservoir low enough to sit under the menu text — the two together
+      //    need 22 m of vertical, which means zooming out until the whole thing
+      //    reads as a map. Raising the downstream ground buys the composition
+      //    back and costs nothing dramatic: the breach still falls 5.8 m.
+      // 3. It also raises the terrain MINIMUM, which is what renderer.js pins
+      //    its parallax hills to (tLow + fraction·viewHeight). With the low
+      //    point at −0.4 every ridge sat below the reservoir and the sky was
+      //    empty; at 4.0 the far ridge crests just above the waterline.
+      //
+      // It runs to x=70 so the flood has somewhere to go: 30 m of plain keeps
+      // the escaped water shallow instead of backing it up against the dam's toe.
+      terrain: [
+        [0, 12.2], [2.5, 11.8], [5, 11.2], [7.5, 10.2], [9.5, 8.6], [11.5, 7.0],
+        [14, 5.9], [18, 5.2], [23, 4.9], [28, 5.0], [30.6, 5.3],
+        [32.4, 5.6], [35.8, 5.6],
+        [37.8, 4.6], [40, 4.1], [44.5, 3.7], [52, 3.1], [62, 2.4], [70, 2],
+      ],
+      // Props sit DOWNSTREAM on purpose. Everything upstream of the dam ends up
+      // under 4 m of water, and a submerged pine reads as a mistake; everything
+      // downstream is what the dam is for — so the frame contains a signpost, a
+      // stand of trees and a house, and by t=17 the flood is going through all
+      // of them. That is the whole game in one shot.
+      props: [
+        { type: 'sign', x: 36.8 }, { type: 'rock', x: 38.1, scale: 0.75 },
+        { type: 'pine', x: 39.8, scale: 0.95 }, { type: 'tree', x: 41.2, scale: 0.8 },
+        { type: 'house', x: 43 }, { type: 'pine', x: 45, scale: 0.85 },
+        { type: 'tree', x: 46.6, scale: 0.9 },
+      ],
+
+      // ---- the dam: a two-column timber crib on the 2.6 m sill ----
+      dam: {
+        x0: 32.4, x1: 35.8,         // upstream face / downstream face. 3.4 m of
+                                    // sill, not 2.6: at 2.6 the crib was half a metre
+                                    // taller than it was wide and read as a sluice
+                                    // GATE rather than a dam. Widening costs nothing
+                                    // structurally — the ties get longer, and it is
+                                    // rowH (the face bay) that decides bending.
+        y: 5.6,                     // sill elevation (both feet anchored)
+        rows: 2,                    // bays above the sill
+        rowH: 2.25,                 // m per bay → crest 10.1, bay length L
+        mat: 'timber',
+      },
+
+      // ---- water ----
+      pond: { x0: 6, x1: 32.2, surface: 7.6 },   // ~48 m² already impounded
+      flood: { x: 2, rate: 3.6, duration: 16, delay: 1.2 },
+                                    // 58 m² down the left wall: surface 7.6 → 9.8.
+                                    // Rate is the pacing knob for the whole loop. At
+                                    // 5 m²/s the front arrived as a wall of water and
+                                    // pinned the face at load 1.17 from t=6, which
+                                    // failed it at t=12 and left eight dead seconds;
+                                    // at 3.6 the rise is gradual, the strain phase
+                                    // lasts six seconds, and the break lands at 14.6.
+
+      // ---- camera (fixed cinematic framing; no player control) ----
+      // The composition rule this settled on: the DOM text owns the top of the
+      // frame, the water owns the bottom, and the crest of the dam is the line
+      // between them. sillAt places the sill 81% of the way down, which puts the
+      // crest at ~60% and the waterline just under the last line of menu text —
+      // so the wordmark is never sitting on a moving surface. (At sillAt 0.64 it
+      // was: the reservoir filled to exactly the height of the letterforms.)
+      // MEASURED, so nobody has to guess again: these are NOT a useful
+      // performance dial. waterRenderer's metaball pass confines itself to the
+      // particle bounding box grown by the kernel, the blur and the deepest
+      // depth-band shift — and that last term is 3.5 m, which at any sane zoom
+      // is ~150 device px of padding on every side of a reservoir only ~130 px
+      // deep. The dirty rectangle is therefore dominated by the padding, not by
+      // the water, and pulling the framing from 38 m out to 43 m (34 px/m down
+      // to 30) bought 0.3 ms of 5.7. 40 m is chosen for the picture alone.
+      viewW: 40,                    // m of world across, when the aspect allows
+      viewH: 22.5,                  // m of world down, ditto
+      zoomInMax: 2.2,               // A portrait phone cannot have both: fit 26 m
+                                    // of width and it shows 45 m of empty sky.
+                                    // So a tall canvas zooms in — but only up to
+                                    // this multiple of the fit-width zoom, or the
+                                    // frame closes to three metres of dam.
+      focusX: 34.1,                 // the dam site
+      focusBias: 0.16,              // fraction of the view the focus sits RIGHT of
+                                    // centre, so the reservoir owns the left half
+      sillAt: 0.81,                 // screen fraction the sill sits at (landscape)
+      sillAtTall: 0.80,             // ... on a portrait canvas: the diorama becomes
+                                    // a lower band and the logo sits over the sky
+      sway: 0.35,                   // m of horizontal drift over one loop (one full
+                                    // period per loop, so the cut never jumps)
+      breathe: 0.02,                // fraction of zoom breathed over one loop
+
+      // ---- atmosphere ----
+      // The renderer's parallax hills are pinned to the terrain's LOWEST point
+      // and sized as a fraction of the view height, which puts them below this
+      // valley's crest at this zoom — i.e. behind the terrain, invisible. Rather
+      // than fight that (renderer.js is not ours to reshape), the diorama adds
+      // its own single atmospheric term: a soft band of cool light lying along
+      // the horizon, drawn over everything. It reads as valley air, it gives the
+      // dark sky something to be dark AGAINST, and it costs one gradient.
+      hazeColor: '#5aa8dc',
+      hazeAlpha: 0.26,
+      hazeTop: 13,                  // m above the sill where the band fades out
+      hazeBottom: 0.5,              // m below it — the band sits in the SKY, peaking
+                                    // just above the crest, so the dam and the
+                                    // waterline are silhouetted against the brightest
+                                    // part of the frame instead of against black
+
+      // ---- level select: same diorama, pushed back ----
+      levelsZoom: 0.90,
+      levelsSillAt: 0.86,
+      levelsSillAtTall: 0.86,
+      levelsDim: 0.30,              // extra scrim alpha over the canvas
+      dimColor: '#0d1b26',
+    },
   },
 
   levels: {

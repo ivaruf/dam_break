@@ -6,13 +6,75 @@
 <meta name="theme-color" content="#0d1b26">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>DAM BUILDER</title>
+<meta name="description" content="Build a dam. Release the flood. Find out where it breaks.">
+<title>DAM BREAK</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="stylesheet" href="styles.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2 26h28v4H2z' fill='%235a6b78'/><path d='M12 6h8l3 20h-14z' fill='%23b9c4cc'/><path d='M3 20c4-3 8 3 12 0' stroke='%2335a7ff' stroke-width='3' fill='none'/></svg>">
+<!-- Favicon: the DAM BREAK motif at 32 px — impounded water on the left, a
+     concrete face with a timber tie, and a bright burst tearing out through the
+     breach. Same silhouette as icons/icon-512.png (tools/make-icons.py), reduced
+     to the four shapes that still read in a browser tab. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230d1b26'/><path d='M1 11h13v17H1z' fill='%232f8fd4'/><path d='M1 11h13v1.8H1z' fill='%23a5e2ff'/><path d='M12.4 5h6.4l2.4 23h-11z' fill='%23c3ced6'/><path d='M12.9 13.2h8.1v2.1h-8.1z' fill='%23c8954a'/><path d='M13.2 17.4h8.6l.6 10.6H13z' fill='%230d1b26'/><path d='M13 17.6c4.1-.6 6.2 2.4 9.9 1.6 3.7-.8 6.2 1.9 8.1 4.2V28H13z' fill='%2335a7ff'/><path d='M13 17.6c4.1-.6 6.2 2.4 9.9 1.6 3.7-.8 6.2 1.9 8.1 4.2v2.1c-2.6-2.4-5-4.3-8.3-3.5-3.3.8-5.6-2-9.7-1.5z' fill='%23dff2ff'/></svg>">
 </head>
 <body>
+
+<!-- ==================== SPLASH ====================
+     Deliberately inline, markup AND style, and placed before the module script:
+     it must paint on the very first frame the browser composites, with no
+     JavaScript and no second network round-trip. On a warm load it is visible
+     for a blink; on a cold 3G first load it is the whole first second, which is
+     exactly when a black screen loses a player. screens.init() removes it.
+     Colours are literals, not CSS variables, so it renders correctly even if
+     styles.css has not arrived yet. -->
+<style>
+/* The wordmark's type metrics and vertical position deliberately MATCH
+   #screen-title's .logo in styles.css (same clamp, weight, tracking, and the
+   same 24vh lift). That is the whole trick of this splash: when screens.init()
+   fades it out, the letters underneath are already in exactly the same place, so
+   the handover reads as the tagline and buttons fading IN rather than as the
+   page jumping. Keep the two in step if either changes. */
+#splash{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;background:#0d1b26;
+  padding-bottom:24vh;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#dfe9f0;
+  transition:opacity .28s ease}
+#splash.out{opacity:0;pointer-events:none}
+#splash .sp-word{font-size:clamp(40px,11vw,84px);font-weight:800;letter-spacing:.05em;
+  line-height:1;text-shadow:0 2px 4px rgba(4,10,16,.95),0 6px 34px rgba(4,10,16,.8)}
+#splash .sp-word span{color:#35a7ff}
+/* the broken rule, same geometry as the title screen's */
+#splash .sp-rule{position:relative;width:min(66vw,300px);height:16px;margin-top:10px}
+#splash .sp-rule i{position:absolute;top:0;height:3px;border-radius:2px;background:#35a7ff}
+#splash .sp-rule i:first-child{left:0;width:50%;box-shadow:0 0 14px rgba(53,167,255,.45)}
+#splash .sp-rule i:last-child{right:0;width:34%;transform:translateY(7px) rotate(2.6deg);background:#1d5f8a}
+/* Pure-CSS water, no assets and no JS: a blue wash rising from the bottom edge,
+   with two sets of WIDE soft light bands counter-drifting across it. Wide and
+   soft is the point — the first attempt used 2-3 px stripes at 100deg, which at
+   that angle are near-vertical hairlines and read unmistakably as rain. */
+#splash .sp-water{position:absolute;left:0;right:0;bottom:0;height:36%;overflow:hidden;
+  pointer-events:none;background:linear-gradient(to top,rgba(53,167,255,.13),transparent);
+  -webkit-mask-image:linear-gradient(to top,#000 20%,transparent);
+  mask-image:linear-gradient(to top,#000 20%,transparent)}
+#splash .sp-water span{position:absolute;left:-60%;bottom:0;width:220%;
+  animation:sp-drift 11s linear infinite}
+#splash .sp-water span:nth-child(1){height:100%;opacity:.55;
+  background-image:repeating-linear-gradient(174deg,
+    rgba(53,167,255,0) 0 26px,rgba(53,167,255,.30) 46px,rgba(53,167,255,0) 66px 118px)}
+#splash .sp-water span:nth-child(2){height:70%;opacity:.5;animation-duration:7s;animation-direction:reverse;
+  background-image:repeating-linear-gradient(177deg,
+    rgba(165,226,255,0) 0 14px,rgba(165,226,255,.26) 24px,rgba(165,226,255,0) 34px 74px)}
+#splash .sp-hint{font-size:12px;letter-spacing:.22em;color:#61798c;margin-top:16px}
+@keyframes sp-drift{from{transform:translateX(0)}to{transform:translateX(27.27%)}}
+@media (prefers-reduced-motion:reduce){#splash .sp-water span{animation:none}}
+</style>
+<div id="splash" aria-hidden="true">
+  <div class="sp-water"><span></span><span></span></div>
+  <div class="sp-word">DAM<span>BREAK</span></div>
+  <div class="sp-rule"><i></i><i></i></div>
+  <p class="sp-hint">LOADING</p>
+</div>
+
 <div id="wrap">
   <canvas id="game"></canvas>
 
@@ -84,12 +146,14 @@
     </div>
   </div>
 
-  <!-- Screens. OPUS C owns markup + screens.js behavior. -->
+  <!-- Screens. OPUS C owns markup + screens.js behavior.
+       #screen-title carries no decorative water of its own any more: the live
+       diorama in src/ui/titleScene.js is behind it on the real canvas, and this
+       screen's job is now only to stay readable over it. -->
   <div id="screen-title" class="screen">
-    <div id="title-water" aria-hidden="true"><span></span><span></span><span></span></div>
     <div class="logo">
-      <h1>DAM<span class="accent">BUILDER</span></h1>
-      <div class="logo-rule"></div>
+      <h1>DAM<span class="accent">BREAK</span></h1>
+      <div class="logo-rule" aria-hidden="true"><i></i><i></i></div>
       <p class="tagline">When the water arrives — will your dam hold?</p>
     </div>
     <button class="big-btn pulse" id="btn-play" type="button">▶ PLAY</button>

@@ -39,6 +39,7 @@ const ASSETS = [
   './src/ui/debug.js',
   './src/levels/levels.js',
   './src/levels/levelLoader.js',
+  './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',

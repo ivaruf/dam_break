@@ -1,4 +1,4 @@
-/* DAM BUILDER — OPUS C owns this file.
+/* DAM BREAK — OPUS C owns this file.
    Instrument-panel UI over a canvas game world: dark blue-slate, restrained,
    legible at a glance. Mobile-first (360×640 baseline), widened at 720px+.
    No build step, no external assets/fonts — system font stack only. */
@@ -201,53 +201,111 @@ html, body {
 .hint { color: var(--text-faint); font-size: 13px; margin-top: 4px; }
 .version-tag { position: absolute; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); right: calc(14px + env(safe-area-inset-right, 0px)); color: var(--text-faint); font-size: 11px; }
 
-/* ---- title screen ---- */
-.logo h1 { font-size: clamp(40px, 11vw, 84px); letter-spacing: 0.06em; line-height: 1; }
-.logo .accent { color: var(--accent); }
-.logo-rule { height: 3px; background: var(--accent); margin: 8px auto 12px; width: 60%; max-width: 220px; border-radius: 2px; }
+/* ---- title screen ----
+   The backdrop is no longer CSS: src/ui/titleScene.js runs a live fluid diorama
+   on the game canvas behind this screen. So this screen's scrim is a WINDOW, not
+   a wall — heavy enough behind the text column to keep every glyph legible,
+   thin enough at the edges that the reservoir, the bowing timber and the breach
+   are all clearly visible. Two layers do that: a radial pool of shade centred on
+   the text, and a top/bottom vignette that anchors the header and the version
+   tag. Nothing here may go opaque; the diorama is the point. */
+#screen-title {
+  /* Lift the whole text block into the upper half. The diorama's waterline sits
+     at ~63% of the canvas height and the crest at ~60%, so a vertically centred
+     menu puts the tagline exactly on the moving surface of the reservoir. This
+     is the other half of that fix (the first half is title.sillAt): text above
+     the crest line, water below it.
 
-/* decorative "water" band behind the title content — three animated layers */
-#title-water {
+     CLAMPED, and that clamp is load-bearing. .screen centres with
+     justify-content, and a flex container whose content is taller than its box
+     overflows in BOTH directions — the top of the wordmark goes above the
+     viewport and no amount of scrolling brings it back. A flat 24vh did exactly
+     that on a 420 px-tall landscape phone. The max() term is the available slack
+     above the ~420 px the text block needs, so the lift fades to nothing rather
+     than pushing the logo off the top. */
+  padding-bottom: calc(20px + min(24vh, max(0px, 100vh - 420px)) + env(safe-area-inset-bottom, 0px));
+  background:
+    /* A TIGHT pool of shade under the wordmark, and nothing else. Two earlier
+       versions covered 76% and then 112% of the frame and both had the same
+       result: measured at the reservoir, the diorama was arriving 65-70%
+       dimmed, which is to say not arriving. The scrim only has to serve the
+       text block, so it is sized to the text block. */
+    radial-gradient(56% 29% at 50% 36%,
+      rgba(6, 13, 20, 0.74) 0%,
+      rgba(6, 13, 20, 0.44) 50%,
+      rgba(6, 13, 20, 0) 100%),
+    /* top and bottom vignette: anchors the update button and the version tag,
+       and keeps the waterline from running into the frame edge */
+    linear-gradient(to bottom,
+      rgba(6, 13, 20, 0.44) 0%,
+      rgba(6, 13, 20, 0.02) 24%,
+      rgba(6, 13, 20, 0.02) 70%,
+      rgba(6, 13, 20, 0.48) 100%);
+}
+/* With the scrim this thin, contrast has to come from the type itself: a hard
+   shadow for edge definition and a wide soft one to lift the glyphs off
+   whatever the water is doing behind them. Cheaper than opacity, and it does
+   not cost the picture anything. */
+#screen-title .logo h1 { text-shadow: 0 2px 4px rgba(4, 10, 16, 0.95), 0 6px 34px rgba(4, 10, 16, 0.8); }
+#screen-title .tagline,
+#screen-title .hint { text-shadow: 0 1px 3px rgba(4, 10, 16, 0.98), 0 2px 16px rgba(4, 10, 16, 0.9); }
+#screen-title .tagline { color: var(--text); }
+#screen-title .hint { color: var(--text-dim); }
+
+.logo h1 {
+  /* 13vh in the middle term as well as 11vw: on a short landscape phone the
+     width is generous and the height is not, and an 84 px wordmark plus buttons
+     does not fit in 420 px. Scaling on the smaller of the two axes is what keeps
+     the block inside the viewport there. */
+  font-size: clamp(40px, min(11vw, 13vh), 84px);
+  letter-spacing: 0.05em;
+  line-height: 1;
+  font-weight: 800;
+}
+.logo .accent { color: var(--accent); }
+
+/* THE BROKEN RULE. Two beams under the wordmark: a long one, then a short one
+   dropped and tilted off the end of it, as if the line itself had failed in the
+   middle. It is the whole logo idea — the name says BREAK, so the rule breaks —
+   and it costs two empty <i> elements. The fault sits under the gap between
+   "DAM" and "BREAK", which is where the eye already is. */
+.logo-rule {
+  position: relative;
+  width: min(66vw, 300px);
+  height: 16px;
+  margin: 10px auto 12px;
+}
+.logo-rule i {
   position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: clamp(70px, 22vh, 160px);
-  overflow: hidden;
-  z-index: -1; /* paints behind .screen's flex-item content (see stacking note below) */
-  pointer-events: none;
+  top: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 14px var(--accent-glow);
 }
-/* Negative z-index here is deliberate: .screen is a flex container, and flex
-   items normally paint in DOM/z-index order regardless of `position`. Giving
-   #title-water z:-1 forces it behind the (auto/0 z-index) logo + buttons that
-   follow it in the markup, without needing to touch the HTML structure. */
-#title-water span {
-  position: absolute;
-  left: 0; bottom: 0;
-  width: 220%;
-  background-repeat: repeat-x;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
+.logo-rule i:first-child { left: 0; width: 50%; }
+.logo-rule i:last-child {
+  right: 0;
+  width: 34%;
+  background: var(--accent-dim);
+  box-shadow: none;
+  transform: translateY(7px) rotate(2.6deg);
 }
-#title-water span:nth-child(1) {
-  height: 100%; opacity: 0.28;
-  background-image: repeating-linear-gradient(100deg, var(--accent-soft) 0 24px, transparent 24px 60px);
-  background-color: var(--accent-dim);
-  animation-name: water-drift; animation-duration: 22s;
-}
-#title-water span:nth-child(2) {
-  height: 68%; opacity: 0.4;
-  background-image: repeating-linear-gradient(96deg, var(--accent-soft) 0 18px, transparent 18px 46px);
-  animation-name: water-drift-rev; animation-duration: 15s;
-}
-#title-water span:nth-child(3) {
-  height: 40%; opacity: 0.6;
-  background-image: repeating-linear-gradient(104deg, var(--accent) 0 8px, transparent 8px 30px);
-  animation-name: water-drift; animation-duration: 9s;
-}
-@keyframes water-drift { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-@keyframes water-drift-rev { from { transform: translateX(-50%); } to { transform: translateX(0); } }
 
 /* ---- levels screen ---- */
-#screen-levels { overflow-y: hidden; align-items: stretch; } /* the screen itself must never scroll away BACK — only the grid does */
+/* The same diorama is still running behind this screen (dimmed and pushed to the
+   lower third by titleScene.js), but here ten cards of small text have to be
+   scannable, so the scrim stays a wall rather than a window — only the top and
+   bottom edges thin out enough to admit that the world is still there. */
+#screen-levels {
+  overflow-y: hidden;      /* the screen itself must never scroll away BACK — only the grid does */
+  align-items: stretch;
+  background: linear-gradient(to bottom,
+    rgba(8, 16, 24, 0.80) 0%,
+    rgba(8, 16, 24, 0.93) 16%,
+    rgba(8, 16, 24, 0.93) 84%,
+    rgba(8, 16, 24, 0.80) 100%);
+}
 /* align-items:stretch (above) is only there so #level-grid can flex-grow to
    fill the space between header and BACK — pull the header text and the
    BACK button back to a natural centred width instead of stretching them */
@@ -653,9 +711,11 @@ html, body {
 
 /* ==================== REDUCED MOTION ==================== */
 @media (prefers-reduced-motion: reduce) {
-  .pulse, .big-btn.release, #hud-timer.urgent, .toast, #title-water span, .update-btn {
+  .pulse, .big-btn.release, #hud-timer.urgent, .toast, #splash .sp-water span, .update-btn {
     animation: none !important;
   }
+  /* The diorama itself is honest motion (it is the game running), so it keeps
+     playing — but the splash shimmer and every UI pulse stop. */
   .toast { opacity: 1; transform: none; }
   .tut-card { animation: none; }
   * { scroll-behavior: auto !important; }

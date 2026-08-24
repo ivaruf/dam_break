@@ -54,6 +54,14 @@ function hideTutorial() {
   if (n) n.classList.add('hidden');
 }
 
+// Empty the HUD toast host. hud.js appends toast nodes with their own removal
+// timers; this just makes sure none of them survive a phase change.
+function clearToasts() {
+  const host = el('hud-toast');
+  if (!host) return;
+  while (host.lastChild) host.removeChild(host.lastChild);
+}
+
 function renderTutorial() {
   const node = el('tutorial');
   if (!node) return;
@@ -81,9 +89,33 @@ function maybeShowTutorial(S) {
   renderTutorial();
 }
 
+// ---- splash -------------------------------------------------------------
+
+// The splash is inline markup + inline CSS in index.html so it paints on the
+// first composited frame, before any module has loaded. Taking it down is the
+// first thing that happens once the game is actually ready to draw, which is
+// here: init() runs inside game.boot(), one frame before the title diorama's
+// first render. Fade, then remove the node outright — a display:none overlay
+// left in the tree is still a stacking context over the canvas.
+function dismissSplash() {
+  const n = el('splash');
+  if (!n) return;
+  n.classList.add('out');
+  const drop = () => {
+    n.style.display = 'none';
+    if (n.parentNode) n.parentNode.removeChild(n);
+  };
+  // The stub DOM in tests/ has no setTimeout guarantees worth relying on, and a
+  // player on a dead battery should not be left with a ghost overlay either:
+  // remove it on the timer, and never mind if the transition was cut short.
+  if (typeof setTimeout === 'function') setTimeout(drop, 320); else drop();
+}
+
 // ---- init ---------------------------------------------------------------
 
 export function init() {
+  dismissSplash();
+
   el('btn-play').addEventListener('click', () => { buildLevelGrid(); show('screen-levels'); });
   el('btn-sandbox').addEventListener('click', () => emit('ui:level', { index: LEVELS.length }));
   el('btn-levels-back').addEventListener('click', () => show('screen-title'));
@@ -103,6 +135,13 @@ export function init() {
     else if (phase === 'levelselect') { hideTutorial(); buildLevelGrid(); show('screen-levels'); }
     else if (phase === 'result') { hideTutorial(); showResult(); }
     else {
+      // The title diorama is the real physics engine, so it fires real 'breach'
+      // and 'overtop' events, and hud.js answers those with a toast. The HUD is
+      // hidden on the menus so nobody sees them — but a toast queued in the last
+      // second before PLAY would still be alive when the HUD appears, and
+      // "BREACH" over a level the player has not built yet is nonsense. Drop
+      // anything left in the host on the way into a level.
+      clearToasts();
       show(null);
       if (phase === 'build') maybeShowTutorial(getScene());
       else hideTutorial();
