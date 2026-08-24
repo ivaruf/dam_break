@@ -226,16 +226,29 @@ Water depth MUST increase load (hydrostatic), and fast water MUST hit harder
 than still water (dynamic term). Both directions of the interaction are
 mandatory: dam blocks/redirects water; water loads and destroys dam.
 
-### Damage model (stress.js; thresholds in CONFIG.damage)
+### Damage model (stress.js; thresholds in CONFIG.damage) — v2.1 adds bending + creep
 
 ```
-load < 0.8            safe
-0.8 – 1.0             visible stress (render concern only)
-1.0 – 1.2             damage += (load − 1) · damageRate · dt
-> 1.2                 damage += (load − 1) · fastRate · dt
-load ≥ hardBreak(1.6) instant break
-damage ≥ 1            break
+axialLoad = |strain| / limit (slenderness-reduced in compression)
+bendLoad  = m.waterFperp · len / (8 · CONFIG.damage.bendScale · mat.bending)
+load      = max(axialLoad, bendLoad)
+
+load < creepStart(0.7)  safe
+creepStart – 1.0        creep: damage += mat.creepRate · (load−creepStart)/(1−creepStart) · dt
+                        (timber fast: ~0.85 sustained fails in ~25–35 s; steel ~20× slower)
+1.0 – 1.2               damage += (load − 1) · damageRate · dt   (creep still applies)
+> 1.2                   fastRate band
+load ≥ hardBreak(1.6)   instant break
+damage ≥ 1              break
 ```
+
+Coupling writes per-member lateral water force each tick: `m.waterFx`,
+`m.waterFy`, `m.waterFperp` (component ⊥ to member axis). stress.js sets
+`m.bendLoad` (kept separately for rendering: lateral bow ∝ bendLoad, direction
+opposite waterFx/waterFy). `firstFailure.mode` gains `'bending'`;
+`firstFailure.sustained` is true when the break's final load was < 1.0 (creep
+failure). Material schema gains `bending` (capacity), `creepRate` (damage/s at
+load 1.0), `headRating` (display-only meters of water head, shown in the HUD).
 
 On break: member.broken = true, spawn debris piece (Opus A), record
 firstFailure if null, return/emit `'member:break' {id, x, y, mode, matId}`.
