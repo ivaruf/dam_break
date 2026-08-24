@@ -1,11 +1,11 @@
-// DAM BUILDER service worker: versioned precache for offline play + install.
+// DAM BREAK service worker: versioned precache for offline play + install.
 // Same opt-in update model as maxgear: bump VERSION on every deploy; the new
 // worker precaches in the background and WAITS until the player taps the
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.1.0'; // materials react: bending snaps long spans, creep eats sustained load
-const CACHE = `dambuilder-${VERSION}`;
+const VERSION = 'v2.2.0'; // rebrand: DAM BREAK — fluid title diorama, splash, new icons
+const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
   './',
@@ -34,6 +34,7 @@ const ASSETS = [
   './src/rendering/waterRenderer.js',
   './src/rendering/effects.js',
   './src/ui/hud.js',
+  './src/ui/titleScene.js',
   './src/ui/screens.js',
   './src/ui/debug.js',
   './src/levels/levels.js',
@@ -57,7 +58,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((k) => k.startsWith('dambuilder-') && k !== CACHE).map((k) => caches.delete(k))
+        keys.filter((k) => (k.startsWith('dambreak-') || k.startsWith('dambuilder-')) && k !== CACHE).map((k) => caches.delete(k))
       ))
       .then(() => self.clients.claim())
   );

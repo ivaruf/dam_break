@@ -25,6 +25,7 @@ import * as effects from '../rendering/effects.js';
 import * as hud from '../ui/hud.js';
 import * as screens from '../ui/screens.js';
 import * as debug from '../ui/debug.js';
+import * as titleScene from '../ui/titleScene.js';
 
 import { LEVELS } from '../levels/levels.js';
 import { loadLevelSpec } from '../levels/levelLoader.js';
@@ -254,6 +255,9 @@ function draw(dtReal) {
   effects.step(dtReal);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (S.phase === 'title' || S.phase === 'levelselect') {
+    titleScene.render(ctx, dtReal, S.phase); // live diorama behind the menus
+  }
   if (S.terrain && S.phase !== 'title' && S.phase !== 'levelselect') {
     renderer.render(ctx, S.camera, S);
     waterRenderer.render(ctx, S.camera, S.water, S);

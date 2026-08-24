@@ -1,5 +1,7 @@
 // Persistent progress + preferences via localStorage. FABLE owns.
 
+// Intentionally still the pre-rename key: changing it would wipe every
+// player's progress. The game is DAM BREAK; the key is just a key.
 const KEY = 'dam-builder-save-v1';
 
 function storage() {

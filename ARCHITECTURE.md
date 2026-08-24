@@ -69,7 +69,7 @@ OPUS B — Construction & Gameplay:
 OPUS C — Rendering, UX & Content:
   styles.css
   src/rendering/renderer.js   src/rendering/waterRenderer.js  src/rendering/effects.js
-  src/ui/hud.js  src/ui/screens.js  src/ui/debug.js
+  src/ui/hud.js  src/ui/screens.js  src/ui/debug.js  src/ui/titleScene.js
   src/levels/levels.js  src/levels/levelLoader.js
 ```
 

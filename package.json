@@ -1,5 +1,5 @@
 {
-  "name": "dam-builder",
+  "name": "dam-break",
   "private": true,
   "type": "module",
   "description": "Browser physics game: build a dam, survive the flood. No build step — static files only.",

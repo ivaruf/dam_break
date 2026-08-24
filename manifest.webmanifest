@@ -1,6 +1,6 @@
 {
-  "name": "DAM BUILDER",
-  "short_name": "DamBuilder",
+  "name": "DAM BREAK",
+  "short_name": "DamBreak",
   "description": "A physics construction game: build a dam, release the flood, watch it hold — or spectacularly fail.",
   "start_url": "./",
   "scope": "./",

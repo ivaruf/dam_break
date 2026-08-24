@@ -1,4 +1,4 @@
-# DAM BUILDER
+# DAM BREAK
 
 A browser physics construction game: build a dam out of timber, steel, concrete
 and cable — then release the flood and find out whether it holds. Inspired by
