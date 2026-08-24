@@ -159,66 +159,124 @@ function money(v) {
   return '$' + s + out;
 }
 
+// "Ten valleys. One rising river." reads better than "10 valleys." — but the
+// count is derived from LEVELS now, so it has to survive someone adding a level.
+const NUMBERS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
+  'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+function words(n) { return NUMBERS[n] !== undefined ? NUMBERS[n] : String(n); }
+
 function badgeFor(lv) {
   if (lv.id === 'sandbox') return { cls: 'sandbox', text: 'SANDBOX' };
   if (lv.mode === 'countdown') return { cls: 'countdown', text: 'COUNTDOWN' };
   return { cls: 'freebuild', text: 'FREE BUILD' };
 }
 
+// Small helper so every element in a card is built the same way.
+function span(cls, text) {
+  const n = document.createElement('span');
+  n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+// A level card is a <div role="button">, not a <button>. The overflow bug that
+// prompted this (subtitles painting outside the card, onto the next one) was
+// actually caused by row sizing on #level-grid — see the long note in
+// styles.css; the card was being clamped from outside, not failing to grow from
+// inside. The div is here because the card is a five-part wrapping grid, which
+// is a layout job, and <button> is the element you least want doing layout.
+//
+// Everything a <button> gave us for free is put back by hand: the role, a tab
+// stop, Enter/Space activation, and aria-disabled for a locked level. Locked
+// cards STAY focusable on purpose — the ARIA pattern for a disabled control that
+// should still be discoverable — they just do not activate.
+function levelCard(lv, index, locked, best) {
+  const card = document.createElement('div');
+  card.className = 'level-card' + (locked ? ' locked' : '') + (best ? ' done' : '');
+  card.dataset.index = String(index);
+
+  // Property assignment AND setAttribute: the reflected IDL properties are what
+  // the headless test harness can read, setAttribute is what older engines
+  // without ARIA reflection need. The guard is for the DOM stub in tests/.
+  const attr = (k, v) => { if (typeof card.setAttribute === 'function') card.setAttribute(k, v); };
+  card.role = 'button';
+  attr('role', 'button');
+  card.tabIndex = 0;
+  attr('tabindex', '0');
+  if (locked) {
+    card.ariaDisabled = 'true';
+    attr('aria-disabled', 'true');
+  }
+
+  const name = locked ? 'LOCKED' : (lv.name || 'Level ' + index);
+  const b = badgeFor(lv);
+
+  // Row 1 of the grid: the name, then the tag cluster. The tags live in ONE
+  // flex item so the badge and the best cost wrap together instead of splitting.
+  const head = span('level-head');
+  head.appendChild(span('level-name', name));
+  const tags = span('level-tags');
+  tags.appendChild(span('badge ' + b.cls, b.text));
+  if (best) tags.appendChild(span('level-best', 'BEST ' + money(best.cost)));
+  // A real element, not the old absolutely-positioned ::after that sat on top
+  // of the badge.
+  if (locked) tags.appendChild(span('level-lock', '🔒'));
+  head.appendChild(tags);
+
+  // Row 2: the subtitle. Its own grid row, so it wraps INSIDE the card however
+  // long it is and whatever else is on row 1.
+  const sub = span('level-sub', locked
+    ? 'Clear level ' + (index - 1) + ' to open this one.'
+    : (lv.subtitle || ''));
+
+  card.append(span('level-num', lv.id === 'sandbox' ? '∞' : String(index)), head, sub);
+
+  // One label for assistive tech instead of five loose fragments.
+  attr('aria-label', (lv.id === 'sandbox' ? 'Sandbox' : 'Level ' + index) + ': ' + name
+    + (locked ? ' — locked' : '') + (best ? ' — best ' + money(best.cost) : ''));
+
+  if (!locked) {
+    const go = () => emit('ui:level', { index });
+    card.addEventListener('click', go);
+    card.addEventListener('keydown', (e) => {
+      const k = e && e.key;
+      if (k !== 'Enter' && k !== ' ' && k !== 'Spacebar') return;
+      // Space scrolls the grid if we let it through, and Enter would re-fire on
+      // key repeat.
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (e.repeat) return;
+      go();
+    });
+  }
+  return card;
+}
+
 function buildLevelGrid() {
   const grid = el('level-grid');
   grid.innerHTML = '';
+
+  // The sandbox is not a campaign level, so it counts towards NEITHER side of
+  // the progress line. Counting its best against a total of LEVELS.length - 1
+  // is what printed "11 of 10 dams standing".
+  const total = Math.max(0, LEVELS.length - 1);
   let cleared = 0;
 
   LEVELS.forEach((lv, i) => {
     const index = i + 1;
     const locked = !isUnlocked(index);
     const best = bestFor(lv.id);
-    if (best) cleared++;
-
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'level-card' + (locked ? ' locked' : '') + (best ? ' done' : '');
-    card.dataset.index = String(index);
-    card.disabled = locked;
-
-    const num = document.createElement('span');
-    num.className = 'level-num';
-    num.textContent = lv.id === 'sandbox' ? '∞' : String(index);
-
-    const name = document.createElement('span');
-    name.className = 'level-name';
-    name.textContent = locked ? 'LOCKED' : (lv.name || 'Level ' + index);
-
-    const sub = document.createElement('span');
-    sub.className = 'level-sub';
-    sub.textContent = locked
-      ? 'Clear level ' + (index - 1) + ' to open this one.'
-      : (lv.subtitle || '');
-
-    const b = badgeFor(lv);
-    const badge = document.createElement('span');
-    badge.className = 'badge ' + b.cls;
-    badge.textContent = b.text;
-
-    const bestEl = document.createElement('span');
-    bestEl.className = 'level-best';
-    // the lock glyph on a locked card comes from .level-card.locked::after
-    bestEl.textContent = best ? 'BEST ' + money(best.cost) : '';
-
-    // .level-sub has flex-basis:100%, so it must come LAST or it pushes the
-    // badge and best-cost onto a third row
-    card.append(num, name, badge, bestEl, sub);
-    if (!locked) card.addEventListener('click', () => emit('ui:level', { index }));
-    grid.appendChild(card);
+    if (best && lv.id !== 'sandbox') cleared++;
+    grid.appendChild(levelCard(lv, index, locked, best));
   });
 
   const prog = el('levels-progress');
   if (prog) {
-    const total = LEVELS.length - 1;                 // sandbox is not a campaign level
-    prog.textContent = cleared > 0
-      ? cleared + ' of ' + total + ' dams standing'
-      : 'Ten valleys. One rising river.';
+    // Belt as well as braces: a save file from an older build (or a renamed
+    // level) must still never be able to print more cleared than there are.
+    const done = Math.min(cleared, total);
+    prog.textContent = done > 0
+      ? done + ' of ' + total + ' dams standing'
+      : words(total) + ' valleys. One rising river.';
   }
 }
 

@@ -239,7 +239,7 @@ export function render(ctx, cam, S) {
     drawDesign(ctx, S.design);
   }
 
-  if (build) drawGhost(ctx);
+  if (build) { drawGhost(ctx); drawMarquee(ctx); }
 
   ctx.restore();
 }
@@ -587,6 +587,12 @@ function drawSign(ctx, px, py, s) {
 
 // ---- objective geometry -------------------------------------------------
 
+// Zone captions are drawn ON the canvas but have to live with the DOM HUD on top
+// of it, so their baseline is measured in CSS px from the top edge and converted
+// once. R.zoneLabelTopPx clears the HUD's top row (name/objective/timer/budget).
+function zoneLabelY() { return R.zoneLabelTopPx * dpr; }
+
+
 function drawProtectZone(ctx, level) {
   const o = level && level.objective;
   if (!o || o.type !== 'protect' || o.x0 === undefined) return;
@@ -620,7 +626,7 @@ function drawProtectZone(ctx, level) {
   ctx.stroke();
   ctx.restore();
 
-  labelAt(ctx, 'PROTECT', (a + b) * 0.5, 22 * dpr, R.protectLine, true);
+  labelAt(ctx, 'PROTECT', (a + b) * 0.5, zoneLabelY(), R.protectLine, true);
 }
 
 function drawBuildZone(ctx, level) {
@@ -640,7 +646,7 @@ function drawBuildZone(ctx, level) {
   ctx.stroke();
   ctx.restore();
   const mid = (Math.max(a, 0) + Math.min(b, W)) * 0.5;
-  labelAt(ctx, 'BUILD ZONE', mid, 22 * dpr, R.buildZoneLine, true);
+  labelAt(ctx, 'BUILD ZONE', mid, zoneLabelY(), R.buildZoneLine, true);
 }
 
 // ---- anchors ------------------------------------------------------------
@@ -1025,6 +1031,7 @@ function drawDesign(ctx, design) {
   const B = getBuilder();
   const sel = B ? B.selection : null;
   const hov = B ? B.hoverMember : null;
+  const doomed = marqueeSet(B);
   const byId = nodeIndex(design);
 
   for (let i = 0; i < design.members.length; i++) {
@@ -1032,11 +1039,30 @@ function drawDesign(ctx, design) {
     const a = byId[dm.a], b = byId[dm.b];
     const mat = MATERIALS[dm.mat];
     if (!a || !b || !mat) continue;
-    if (dm.id === sel) highlightMemberXY(ctx, a, b, mat, R.selectColor, 0.34);
+    // "about to be deleted" outranks both selection and hover: it is the only
+    // one of the three that is about to destroy the player's work.
+    const dead = doomed !== null && doomed.has(dm.id);
+    if (dead) highlightMemberXY(ctx, a, b, mat, R.marqueeHitColor, R.marqueeHitAlpha);
+    else if (dm.id === sel) highlightMemberXY(ctx, a, b, mat, R.selectColor, 0.34);
     else if (dm.id === hov) highlightMemberXY(ctx, a, b, mat, R.selectColor, 0.14);
     strokeFlat(ctx, a.x, a.y, b.x, b.y, mat);
+    // ... plus a dashed overstroke ON the member. The halo alone is a colour
+    // channel and nothing else; the dashes survive being small, being over a
+    // busy backdrop, and being looked at by a colour-blind player.
+    if (dead) dashOverMember(ctx, a, b, mat);
   }
   drawDesignNodes(ctx, design);
+}
+
+function dashOverMember(ctx, a, b, mat) {
+  ctx.save();
+  ctx.setLineDash(R.marqueeDash);
+  memberPath(ctx, a.x, a.y, b.x, b.y, 0);
+  ctx.globalAlpha = R.marqueeHitDashAlpha;
+  ctx.strokeStyle = R.marqueeHitColor;
+  ctx.lineWidth = Math.max(1.5, Math.min(3.5 * dpr, ((mat && mat.thickness) || 0.3) * zoom * 0.55));
+  ctx.stroke();
+  ctx.restore();
 }
 
 // design nodes are plain objects; a tiny reused index avoids Map churn
@@ -1095,15 +1121,23 @@ function drawGhost(ctx) {
   const B = getBuilder();
   if (!B) return;
 
-  if (B.tool === 'erase' && B.hover) {            // eraser cursor
+  if (B.hover && (B.tool === 'erase' || B.tool === 'boxdelete')) {
     const px = SX(B.hover.x), py = SY(B.hover.y);
-    const r = Math.max(10 * dpr, CONFIG.build.hitPx * dpr * 0.8);
     ctx.save();
     ctx.setLineDash(R.dash);
-    ctx.beginPath();
-    ctx.arc(px, py, r, 0, TAU);
     ctx.strokeStyle = R.ghostBad;
     ctx.lineWidth = Math.max(1, 1.5 * dpr);
+    ctx.beginPath();
+    if (B.tool === 'boxdelete') {
+      // A dashed SQUARE, not the eraser's circle, and the same shape as the
+      // toolbar icon: the cursor tells you the gesture is "drag a box" before
+      // you have dragged anything. (A bare tap here still erases one member —
+      // that is the tool's fallback — so the cursor stays a delete cue.)
+      const s = R.marqueeCursorPx * dpr;
+      ctx.rect(px - s, py - s, s * 2, s * 2);
+    } else {
+      ctx.arc(px, py, Math.max(10 * dpr, CONFIG.build.hitPx * dpr * 0.8), 0, TAU);
+    }
     ctx.stroke();
     ctx.restore();
   }
@@ -1141,6 +1175,62 @@ function drawGhost(ctx) {
     ? g.len.toFixed(1) + ' m  ·  $' + Math.round(g.cost)
     : (g.reason ? String(g.reason).toUpperCase() : 'CANNOT BUILD');
   labelAt(ctx, txt, SX(g.x1), SY(g.y1) - 20 * dpr, g.ok ? R.ghostOk : R.ghostBad, false);
+}
+
+// ---- box-delete marquee -------------------------------------------------
+//
+// builder.js publishes getBuilder().marquee = {x0,y0,x1,y1} (world, already
+// normalized so x0<x1 and y0<y1) plus marqueeHits = [memberId,...] while the
+// box-delete drag is live, and null/[] otherwise — including for the first ~6px
+// of travel, before the gesture has committed to being a box rather than a tap.
+// So "no marquee" is a completely normal state and is simply not drawn.
+
+// The hit list is rebuilt from scratch on every pointer move, so it is a fresh
+// array each time and cannot be cached by identity for long — but it CAN be
+// cached within a frame-pair (render + any overlay pass), which is what saves
+// re-hashing a hundred ids twice per frame. Reused Set, no allocation.
+const doomedSet = new Set();
+let doomedSrc = null;
+
+function marqueeSet(B) {
+  const list = B && B.marqueeHits;
+  if (!list || !list.length) { doomedSrc = null; return null; }
+  if (doomedSrc === list) return doomedSet;
+  doomedSet.clear();
+  for (let i = 0; i < list.length; i++) doomedSet.add(list[i]);
+  doomedSrc = list;
+  return doomedSet;
+}
+
+function drawMarquee(ctx) {
+  const B = getBuilder();
+  const m = B && B.marquee;
+  if (!m) return;
+  if (!isFinite(m.x0) || !isFinite(m.y0) || !isFinite(m.x1) || !isFinite(m.y1)) return;
+
+  // World y is up, screen y is down: y1 (the larger world y) is the TOP edge.
+  const x = SX(m.x0), y = SY(m.y1);
+  const w = SX(m.x1) - x, h = SY(m.y0) - y;
+  if (!(w >= R.marqueeMinPx) || !(h >= R.marqueeMinPx)) return;
+  if (x > W || y > H || x + w < 0 || y + h < 0) return;
+
+  ctx.save();
+  ctx.fillStyle = R.marqueeFill;
+  ctx.fillRect(x, y, w, h);
+  ctx.setLineDash(R.marqueeDash);
+  ctx.lineDashOffset = 0;              // deterministic: no marching ants
+  ctx.strokeStyle = R.marqueeLine;
+  ctx.lineWidth = Math.max(1, 1.6 * dpr);
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+
+  // The count is the whole reason to look at the box: "this will take 7 beams"
+  // is the difference between a confident drag and an undo.
+  const n = (B.marqueeHits && B.marqueeHits.length) || 0;
+  if (n > 0) {
+    labelAt(ctx, n === 1 ? 'DELETE 1 BEAM' : 'DELETE ' + n + ' BEAMS',
+      x + w * 0.5, Math.max(R.labelFontPx * dpr + 4 * dpr, y - 6 * dpr), R.marqueeLine, true);
+  }
 }
 
 // A ring whose look says what the endpoint snapped to.

@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.2.0'; // rebrand: DAM BREAK — fluid title diorama, splash, new icons
+const VERSION = 'v2.3.0'; // mobile UX overhaul + box-delete section tool
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

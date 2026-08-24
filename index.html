@@ -106,42 +106,92 @@
     </div>
 
     <div id="hud-toast" aria-live="polite"></div>
+    <button id="btn-hud-menu" class="tool-btn" type="button" title="Levels (Esc)" aria-label="Levels">☰</button>
 
-    <div id="toolbar">
-      <div id="material-bar"></div>
-      <div id="tool-group">
-        <button id="btn-erase" class="tool-btn" type="button" title="Erase (E)">⌫</button>
-        <button id="btn-undo" class="tool-btn" type="button" title="Undo (Z)">↶</button>
-        <button id="btn-redo" class="tool-btn" type="button" title="Redo (Y)">↷</button>
-        <button id="btn-clear" class="tool-btn" type="button" title="Clear the whole dam">🗑</button>
-      </div>
-    </div>
+    <!-- ==================== THE BOTTOM STACK ====================
+         One bottom-anchored flex column owns EVERYTHING at the foot of the
+         screen: the tutorial card, the build hint, the toolbar (materials +
+         tool cluster + RELEASE WATER) and the sim controls. These used to be
+         five independently absolute-positioned boxes that reserved space from
+         each other with magic pixel offsets — which is precisely how the tool
+         cluster (erase/undo/redo/clear) ended up scrolled off the right edge on
+         a phone, and how the build hint ended up sitting on the release button.
 
-    <div id="sim-controls" class="hidden">
-      <button class="speed-btn" data-speed="0" type="button">⏸</button>
-      <button class="speed-btn" data-speed="0.25" type="button">¼×</button>
-      <button class="speed-btn active" data-speed="1" type="button">1×</button>
-      <button class="speed-btn" data-speed="2" type="button">2×</button>
-      <button class="speed-btn" data-speed="4" type="button">4×</button>
-      <button id="btn-sim-retry" class="tool-btn" type="button" title="Retry (R)">↻</button>
-      <button id="btn-sim-edit" class="tool-btn" type="button" title="Edit dam">✎</button>
-    </div>
-
-    <button id="btn-release" class="big-btn release hidden" type="button">⚠ RELEASE WATER</button>
-    <button id="btn-hud-menu" class="tool-btn" type="button" title="Levels (Esc)">☰</button>
-    <div id="build-hint" class="hidden"></div>
-
-    <!-- First-level tutorial. Bottom card on purpose: it must never block the build area. -->
-    <div id="tutorial" class="hidden">
-      <div class="tut-card">
-        <span id="tut-step" class="tut-step"></span>
-        <h3 id="tut-title"></h3>
-        <p id="tut-text"></p>
-        <div class="tut-foot">
-          <div id="tut-dots" class="tut-dots"></div>
-          <button class="small-btn ghost-btn" id="btn-tut-skip" type="button">SKIP</button>
-          <button class="small-btn primary-btn" id="btn-tut-next" type="button">GOT IT →</button>
+         In a flex column overlap is structurally impossible. And because the
+         column is anchored at the BOTTOM and grows upwards, showing or hiding a
+         row ABOVE the toolbar (a hint, the tutorial) never moves the controls
+         that are already under the player's thumb. -->
+    <div id="hud-bottom">
+      <!-- First-level tutorial. Above the toolbar in the stack on purpose: it
+           can never cover the controls it is talking about. -->
+      <div id="tutorial" class="hidden">
+        <div class="tut-card">
+          <span id="tut-step" class="tut-step"></span>
+          <h3 id="tut-title"></h3>
+          <p id="tut-text"></p>
+          <div class="tut-foot">
+            <div id="tut-dots" class="tut-dots"></div>
+            <button class="small-btn ghost-btn" id="btn-tut-skip" type="button">SKIP</button>
+            <button class="small-btn primary-btn" id="btn-tut-next" type="button">GOT IT →</button>
+          </div>
         </div>
+      </div>
+
+      <div id="build-hint" class="hidden"></div>
+
+      <div id="toolbar">
+        <!-- (a) MATERIALS — the only thing allowed to scroll. hud.js fills
+                 #material-bar and toggles the fade-l/fade-r masks on the strip
+                 so a clipped strip visibly reads as scrollable. -->
+        <div id="material-strip"><div id="material-bar"></div></div>
+
+        <!-- (b) TOOLS — fixed, never scrolled, never under the release button. -->
+        <div id="tool-group">
+          <button id="btn-tool-build" class="tool-btn" type="button"
+                  title="Build beams — drag between anchors" aria-label="Build beams">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M6 18 18 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+              <circle cx="6" cy="18" r="2.7" fill="currentColor"/>
+              <circle cx="18" cy="6" r="2.7" fill="currentColor"/>
+            </svg>
+          </button>
+          <button id="btn-erase" class="tool-btn danger" type="button"
+                  title="Erase — drag across beams to delete them (E)" aria-label="Erase">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9.4 19.5 4.6 14.7a1.6 1.6 0 0 1 0-2.3l7.6-7.6a1.6 1.6 0 0 1 2.3 0l4.8 4.8a1.6 1.6 0 0 1 0 2.3l-7.7 7.6z"
+                    fill="none" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M9.4 19.5H20" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+              <path d="M8.6 8.6 15.4 15.4" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+            </svg>
+          </button>
+          <!-- NEW: box delete. Dashed square with an ×, because that is exactly
+               what the tool draws on the world (renderer.drawMarquee). -->
+          <button id="btn-boxdelete" class="tool-btn danger" type="button"
+                  title="Box delete — drag a box over a section to delete it (X)" aria-label="Box delete">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3.4" y="3.4" width="17.2" height="17.2" rx="2.2" fill="none"
+                    stroke="currentColor" stroke-width="1.6" stroke-dasharray="3.4 2.7"/>
+              <path d="M8.9 8.9 15.1 15.1M15.1 8.9 8.9 15.1" stroke="currentColor"
+                    stroke-width="2.1" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <span class="tool-sep" aria-hidden="true"></span>
+          <button id="btn-undo" class="tool-btn" type="button" title="Undo (Z)" aria-label="Undo">↶</button>
+          <button id="btn-redo" class="tool-btn" type="button" title="Redo (Y)" aria-label="Redo">↷</button>
+          <button id="btn-clear" class="tool-btn" type="button" title="Clear the whole dam" aria-label="Clear the whole dam">🗑</button>
+        </div>
+
+        <button id="btn-release" class="big-btn release hidden" type="button">⚠ RELEASE WATER</button>
+      </div>
+
+      <div id="sim-controls" class="hidden">
+        <button class="speed-btn" data-speed="0" type="button" aria-label="Pause">⏸</button>
+        <button class="speed-btn" data-speed="0.25" type="button">¼×</button>
+        <button class="speed-btn active" data-speed="1" type="button">1×</button>
+        <button class="speed-btn" data-speed="2" type="button">2×</button>
+        <button class="speed-btn" data-speed="4" type="button">4×</button>
+        <button id="btn-sim-retry" class="tool-btn" type="button" title="Retry (R)" aria-label="Retry">↻</button>
+        <button id="btn-sim-edit" class="tool-btn" type="button" title="Edit dam" aria-label="Edit dam">✎</button>
       </div>
     </div>
   </div>

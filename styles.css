@@ -56,6 +56,12 @@
   --scrim-screen: rgba(8, 16, 24, 0.9); /* the dimmed backdrop behind full-screen overlays */
 
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* HUD geometry that TWO rules have to agree on, so it lives in one place:
+     the top-right menu button's own inset, and the right-hand gutter the
+     readouts must keep clear of it. 44px button + 12px edge inset. */
+  --hud-menu-gap: 56px;
+  --hud-menu-top: 68px;   /* one #hud-top row down, so it never fights the budget */
 }
 
 /* ==================== RESET / BASE ==================== */
@@ -126,6 +132,12 @@ html, body {
   justify-content: center;
   flex: 0 0 auto;
 }
+/* Icon tools draw with inline SVG rather than a glyph where no glyph says the
+   right thing (a beam between two nodes; a dashed box with an ×). currentColor
+   throughout, so they inherit every state colour below for free. */
+.tool-btn > svg { width: 22px; height: 22px; display: block; pointer-events: none; }
+.tool-btn.active { border-color: var(--accent); background: var(--surface-3); color: var(--accent); }
+.tool-btn.danger.active { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
 .speed-btn {
   font-size: 14px;
   font-weight: 700;
@@ -158,13 +170,17 @@ html, body {
 }
 @keyframes update-glow { 50% { opacity: 0.7; } }
 
+/* .level-card is a <div role="button">, not a <button> (see the levels block for
+   why), so its "disabled" state is aria-disabled — hence every rule below
+   matches BOTH the real :disabled pseudo-class and the ARIA attribute. */
 .big-btn:not(:disabled):active,
 .small-btn:not(:disabled):active,
 .tool-btn:not(:disabled):active,
 .speed-btn:not(:disabled):active,
-.level-card:not(:disabled):active { transform: scale(0.96); }
+.level-card:not([aria-disabled="true"]):active { transform: scale(0.96); }
 
-.big-btn:disabled, .small-btn:disabled, .tool-btn:disabled, .speed-btn:disabled, .level-card:disabled {
+.big-btn:disabled, .small-btn:disabled, .tool-btn:disabled, .speed-btn:disabled,
+.level-card[aria-disabled="true"] {
   opacity: 0.4;
   cursor: default;
   box-shadow: none;
@@ -184,6 +200,13 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  /* SAFE centring, and it is load-bearing on a short landscape phone: a flex
+     container that centres content TALLER than its own box overflows in both
+     directions, and the half that goes off the top edge is unreachable — no
+     amount of scrolling brings it back. `safe center` degrades to flex-start
+     exactly in that case. The plain `center` above stays as the fallback for
+     engines that do not know the keyword. */
+  justify-content: safe center;
   gap: 14px;
   background: var(--scrim-screen);
   text-align: center;
@@ -319,37 +342,117 @@ html, body {
   width: min(100%, 900px);
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 1fr;
+  /* One column on a narrow phone, two or more the moment there is room, with no
+     media query: minmax(min(100%, 260px), 1fr) means "260px unless 260px is
+     wider than the track, in which case take the track". The bare 260px form
+     overflows the grid on a 320px screen; the min() is what stops that. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  /* THIS LINE IS THE BUG FIX. It is not a tidy-up.
+     The rows used to be `auto`, i.e. minmax(auto, auto). This grid is a SCROLL
+     container with a DEFINITE height (it is a flex item with flex:1 1 auto), and
+     when the sum of a definite-height grid's auto rows exceeds that height,
+     Chromium shrinks every auto row towards its MINIMUM instead of overflowing
+     it. The minimum here was .level-card's own min-height: 60px. Then the
+     default align-items:stretch clamped every card to exactly that 60px while
+     its content wanted 73px — so the subtitle painted 13px BELOW the card's own
+     background, on top of the gap and the next card down, and a card with a BEST
+     line put the best cost outside the box entirely.
+     max-content rows are sized by the card's content and are never shrunk, so
+     the card box always contains the card. (Everything still stretches to the
+     row, so two cards side by side in the 2-column layout stay equal height.) */
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 10px;
   padding: 4px 2px 12px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
+/* ---- THE LEVEL CARD ----
+   Two changes here, and it is worth being precise about which one fixed what,
+   because the obvious suspect was innocent.
+
+   WHAT ACTUALLY CAUSED THE OVERFLOW: the row sizing on #level-grid above, not
+   this element. Measured proof: a card pinned to 60px with 73px of content
+   sprang to its correct 63px the instant `align-self: start` was set on it, and
+   every row track came out right the instant #level-grid got
+   `grid-auto-rows: max-content`. Neither of those touches the card's own
+   internals, and both work with the card still being a <button>. The card was
+   being CLAMPED from outside, not failing to grow from inside.
+
+   WHY IT IS A <div role="button"> ANYWAY: the card is a wrapping, multi-line,
+   grid-structured block of five bits of information. That is a layout job, and a
+   <button> is the one element you least want doing layout — its baseline
+   alignment, intrinsic sizing and child-layout behaviour all have special cases,
+   which is exactly why the button theory was plausible in the first place. A div
+   with the role, the tab stop and Enter/Space handling (screens.js) behaves like
+   a button to a user and a screen reader, and like a plain box to the layout
+   engine. Its "disabled" is aria-disabled, hence the attribute selectors above.
+
+   The layout itself is a two-column grid rather than the old wrapping flex row,
+   so the subtitle has a REAL row of its own and cannot be pushed anywhere: the
+   number spans both rows on the left, everything else stacks in column 2. */
 .level-card {
-  display: flex;
-  flex-wrap: wrap; /* level-sub drops to its own full-width row when the name/badge/best don't leave room */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  column-gap: 12px;
+  row-gap: 3px;
   text-align: left;
-  padding: 12px 14px;
+  padding: 11px 14px;
   border-radius: var(--radius);
   background: var(--surface-2);
   min-height: 60px;
-  position: relative;
+  /* Deliberately NO `overflow: hidden` here. It was tried, and it converts the
+     bug rather than fixing it: an under-sized card stops bleeding onto its
+     neighbour and starts guillotining its own subtitle mid-word instead, which
+     is the other half of what the player reported. The row sizing above is what
+     makes the box fit the content; tests/ui-layout.mjs asserts scrollHeight
+     never exceeds clientHeight so a regression shows up as a failure rather
+     than as either symptom. */
 }
 .level-num {
+  grid-column: 1;
+  grid-row: 1 / span 2;
   font-size: clamp(22px, 6vw, 28px);
   font-weight: 800;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
   min-width: 1.4em;
   text-align: center;
-  flex: 0 0 auto;
 }
-.level-name { font-size: clamp(14px, 3.8vw, 16px); font-weight: 700; flex: 1 1 auto; min-width: 0; }
-.level-sub { font-size: clamp(11px, 3.2vw, 13px); color: var(--text-dim); flex-basis: 100%; margin-left: calc(1.4em + 12px); }
-.level-best { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+/* Row 1: the name, then the tag cluster pushed to the right. Both wrap, and
+   because .level-tags is one flex item the badge and the best cost travel
+   together to a second line instead of splitting up raggedly. */
+.level-head {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+  min-width: 0;
+}
+.level-name {
+  font-size: clamp(14px, 3.8vw, 16px);
+  font-weight: 700;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;   /* a long level name breaks, it never clips mid-word */
+}
+.level-tags { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
+/* Row 2: the subtitle, in its own grid row, wrapping freely inside the card. */
+.level-sub {
+  grid-column: 2;
+  grid-row: 2;
+  font-size: clamp(11px, 3.2vw, 13px);
+  color: var(--text-dim);
+  min-width: 0;
+  overflow-wrap: break-word;
+  line-height: 1.35;
+}
+.level-best { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.level-lock { font-size: 13px; opacity: 0.6; }
 
 .badge {
   font-size: 10px;
@@ -364,19 +467,14 @@ html, body {
 .badge.sandbox { background: var(--sandbox-soft); color: var(--sandbox); }
 
 .level-card.done { border-left: 4px solid var(--good); background: linear-gradient(90deg, var(--good-soft), var(--surface-2) 18%); }
-.level-card.locked, .level-card:disabled {
+.level-card.locked {
   background: var(--surface);
   color: var(--text-faint);
   box-shadow: none;
 }
-.level-card.locked .level-name, .level-card:disabled .level-name { color: var(--text-faint); }
-.level-card.locked::after, .level-card:disabled::after {
-  content: '🔒';
-  position: absolute;
-  top: 10px; right: 12px;
-  font-size: 14px;
-  opacity: 0.6;
-}
+.level-card.locked .level-name { color: var(--text-faint); }
+/* The padlock is a real element in .level-tags now, not an absolutely
+   positioned ::after — the old one sat on top of the FREE BUILD badge. */
 
 /* ---- result screen ---- */
 .end-card {
@@ -413,9 +511,13 @@ html, body {
 
 /* ==================== HUD — TOP BAR & METERS ==================== */
 #hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
-/* only real controls opt back in to receiving input — everything else lets
-   pointer events fall through to the canvas underneath */
-#hud button, #toolbar, #sim-controls, .tut-card { pointer-events: auto; }
+/* Only real controls opt back in to receiving input — everything else lets
+   pointer events fall through to the canvas underneath. #toolbar is deliberately
+   NOT in this list any more: it is a full-width row in the bottom stack now, and
+   an `auto` box there would swallow every drag along the foot of the play area.
+   The buttons take their own hits; #material-strip needs it to be touch-
+   scrollable; .tut-card needs it so you cannot build through the card. */
+#hud button, #material-strip, .tut-card { pointer-events: auto; }
 
 #hud-top {
   position: absolute;
@@ -429,20 +531,29 @@ html, body {
   padding: 10px clamp(10px, 3vw, 16px);
 }
 
-.hud-label { display: block; font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+/* nowrap is load-bearing. "LEFT OF $5,470" broke onto THREE lines when the top
+   row got tight (a 320px screen with the countdown timer column showing), and
+   the third line landed on top of #btn-hud-menu one row below. */
+.hud-label { display: block; font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
 
+/* The squeeze order in this row is explicit. #hud-level is the ONLY column that
+   may lose width, because it is the only one that degrades gracefully — it
+   ellipsises. The timer and the budget hold their min-content (their labels do
+   not wrap any more), so they can neither wrap into the row below nor spill
+   their own box. Sum of the min-contents is ~160px, so this still fits a 280px
+   screen with all three columns showing. */
 #hud-level { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; max-width: 44%; }
 #hud-level-name { font-size: clamp(13px, 3.8vw, 16px); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #hud-objective { font-size: clamp(10px, 2.8vw, 12px); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #objective-meter { width: 100%; max-width: 160px; margin-top: 2px; }
 
-#hud-timer { display: flex; flex-direction: column; align-items: center; text-align: center; flex: 0 0 auto; }
+#hud-timer { display: flex; flex-direction: column; align-items: center; text-align: center; flex: 0 0 auto; min-width: min-content; }
 #timer-text { font-size: clamp(20px, 6.5vw, 30px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
 #hud-timer.urgent #timer-text, #hud-timer.urgent .hud-label { color: var(--danger); }
 #hud-timer.urgent { animation: timer-urgent 0.8s ease-in-out infinite; }
 @keyframes timer-urgent { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
 
-#hud-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 0; flex: 0 1 auto; max-width: 52%; }
+#hud-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: min-content; flex: 0 1 auto; max-width: 52%; }
 #hud-budget { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; width: 100%; }
 #budget-left { font-size: clamp(14px, 3.8vw, 17px); font-weight: 700; font-variant-numeric: tabular-nums; }
 #budget-meter { width: 100%; max-width: 150px; }
@@ -451,9 +562,18 @@ html, body {
    flex-shrunk box overflows its own bounds and prints on top of the neighbour
    (they don't wrap — there is no break opportunity inside "248%"). flex:0 0 auto
    + nowrap keeps each column exactly as wide as its content. */
-/* Inset past #btn-hud-menu's corner (it sits at top:68px, exactly this row's
-   height) and wrap instead of running off the screen edge when space is short. */
-#hud-readouts { display: flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end; padding-right: 56px; }
+/* The right-hand gutter is reserved for #btn-hud-menu, which is absolutely
+   positioned OUTSIDE this flow (it sits in its own row at --hud-menu-top,
+   clear of the budget block). Both the button's offset and this padding are
+   derived from --hud-menu-gap so they cannot drift apart into an overlap — the
+   readouts running under the menu button was a real regression once. */
+#hud-readouts {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  padding-right: var(--hud-menu-gap);
+}
 .readout { display: flex; flex-direction: column; align-items: flex-end; flex: 0 0 auto; }
 .readout > span { white-space: nowrap; }
 .readout > span:first-child { font-size: clamp(12px, 3.2vw, 14px); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -506,37 +626,80 @@ html, body {
   100% { opacity: 0; transform: translateY(-10px); }
 }
 
-/* ==================== HUD — TOOLBAR & MATERIALS ==================== */
-/* The bottom-left build toolbar. On a 360px phone it cannot fit four rich
-   material buttons + four tool icons side by side and still leave room for
-   the release button — so it scrolls horizontally instead of stacking or
-   shrinking below the 44px touch minimum. */
-#toolbar {
+/* ==================== HUD — THE BOTTOM STACK ==================== */
+/* Everything that lives at the foot of the screen is a row in ONE bottom-
+   anchored flex column: tutorial, build hint, toolbar (materials + tools +
+   RELEASE WATER), sim controls. See the long comment on #hud-bottom in
+   index.html for why. Two consequences worth stating here:
+     · overlap between any two of them is structurally impossible, in either
+       orientation, at any width — there are no reserved-pixel offsets left;
+     · the column grows UPWARDS, so a hint or the tutorial appearing above the
+       toolbar never shifts the controls already under the player's thumb. */
+#hud-bottom {
   position: absolute;
   left: env(safe-area-inset-left, 0px);
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-  /* reserve room for RELEASE WATER (~200px incl. margin) so the strip never
-     slides underneath it on phones — it scrolls instead */
-  max-width: calc(100vw - 212px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  right: env(safe-area-inset-right, 0px);
+  bottom: 0;
+  max-height: 100%;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  /* The inset lives in PADDING, not in `left`. An overflow container clips at
-     its padding box, so a child flush against the edge (and its focus ring /
-     active glow) gets cut off — which is what clipped the first material
-     label. Padding keeps the first and last buttons clear of the clip edge,
-     and scroll-padding keeps them clear when the strip is scrolled too. */
-  padding: 4px 10px;
-  scroll-padding-inline: 10px;
+  padding: 0 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;   /* children opt back in — see the #hud rule above */
+}
+
+/* Default (narrow portrait) shape: materials on their own row, then the tool
+   cluster, then RELEASE WATER full-width across the bottom. Full-width is not a
+   compromise — it is the best thumb target on the screen for the one
+   irreversible action in the game. */
+#toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* (a) MATERIALS — the ONLY thing here allowed to scroll, because it is the only
+   thing where "there is more, swipe for it" is an acceptable answer. The inset
+   lives in PADDING, not in a margin: an overflow container clips at its padding
+   box, so a child flush against the edge (and its focus ring / active glow)
+   gets cut off — that is what clipped the first material label originally. */
+#material-strip {
+  display: flex;
+  min-width: 0;
+  padding: 4px 2px;
+  scroll-padding-inline: 4px;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
-#toolbar::-webkit-scrollbar { display: none; }
-
+#material-strip::-webkit-scrollbar { display: none; }
+/* Scroll affordance. hud.js measures scrollWidth vs clientWidth and toggles
+   these, so the fade appears only when something really is hidden — and only on
+   the side it is hidden on. The mask applies to the scroll container's own box
+   (not its scrolled content), which is exactly what makes it read as an edge. */
+#material-strip.fade-r {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 30px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 30px), transparent 100%);
+}
+#material-strip.fade-l {
+  -webkit-mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 30px), transparent 100%);
+  mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 30px), transparent 100%);
+}
+#material-strip.fade-l.fade-r {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 30px, #000 calc(100% - 30px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 30px, #000 calc(100% - 30px), transparent 100%);
+}
 #material-bar { display: flex; gap: 6px; flex: 0 0 auto; }
-#tool-group { display: flex; gap: 6px; flex: 0 0 auto; padding-left: 8px; border-left: 1px solid var(--border); }
+
+/* (b) TOOLS — fixed. 6 × 44px + gaps = 294px, which fits inside a 320px
+   viewport, so this cluster NEVER scrolls and never hides. The separator splits
+   "what am I doing" (build/erase/box) from "take it back" (undo/redo/clear). */
+#tool-group { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.tool-sep { flex: 0 0 auto; width: 1px; align-self: stretch; margin: 5px 2px; background: var(--border-strong); }
 
 /* material buttons — built by hud.js as .tool-btn.mat-btn with swatch/name/cost/key children */
 .mat-btn {
@@ -565,7 +728,7 @@ html, body {
 .mat-btn[data-mat="concrete"] .mat-swatch { background: var(--mat-concrete); }
 .mat-btn[data-mat="cable"] .mat-swatch { background: var(--mat-cable); }
 .mat-name { font-size: clamp(9px, 2.6vw, 11px); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
-.mat-cost { font-size: clamp(8px, 2.2vw, 10px); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.mat-cost { font-size: clamp(8px, 2.2vw, 10px); color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* head rating — what this material BUYS you, so it is accent-coloured against
    the dim cost line right above it: one row is a price, the other a capability.
    Optional: hud.js only creates it when the material has a headRating, and the
@@ -599,45 +762,37 @@ html, body {
 .mat-btn.unaffordable { opacity: 0.42; }
 
 /* ==================== HUD — SIM CONTROLS, RELEASE, MENU ==================== */
+/* Also rows in the bottom stack. WRAPS rather than scrolls: a speed control the
+   player cannot find is worse than two short rows of them, and unlike materials
+   there is no "more of the same" to swipe for — every one of these is unique. */
 #sim-controls {
-  position: absolute;
-  left: 50%;
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 6px;
-  max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+  min-width: 0;
 }
-#sim-controls::-webkit-scrollbar { display: none; }
 
 #btn-release {
-  position: absolute;
-  right: calc(12px + env(safe-area-inset-right, 0px));
-  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  width: 100%;              /* portrait: the full width of the stack */
   font-size: clamp(13px, 3.6vw, 18px);
-  padding: clamp(10px, 2.8vw, 16px) clamp(14px, 4vw, 26px);
-  z-index: 2;
+  padding: clamp(10px, 2.8vw, 15px) clamp(14px, 4vw, 26px);
 }
 
-/* menu/levels button lives in its own top-right column, clear of #hud-top
-   (reserves ~68px under the safe-area-adjusted top bar — see report for the
-   full vertical budget) */
+/* menu/levels button lives in its own top-right row, one #hud-top row below the
+   budget block. Its inset and the readouts' right gutter both derive from
+   --hud-menu-gap / --hud-menu-top (see the tokens block). */
 #btn-hud-menu {
   position: absolute;
-  right: calc(12px + env(safe-area-inset-right, 0px));
-  top: calc(env(safe-area-inset-top, 0px) + 68px);
+  right: calc(var(--hud-menu-gap) - 44px + env(safe-area-inset-right, 0px));
+  top: calc(env(safe-area-inset-top, 0px) + var(--hud-menu-top));
 }
 
-/* build hint: a correction ("over budget") or a calm level hint — sits just
-   above the toolbar, centred, never mistakable for a button */
+/* build hint: a correction ("over budget") or a calm level hint. A row in the
+   bottom stack ABOVE the toolbar, so it can never sit on the release button (it
+   used to, at bottom:70px) and its appearing never nudges the controls. */
 #build-hint {
-  position: absolute;
-  left: 50%;
-  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
+  align-self: center;
   max-width: min(340px, 86vw);
   text-align: center;
   padding: 6px 16px;
@@ -653,20 +808,34 @@ html, body {
 #build-hint.info { color: var(--text-dim); border-color: var(--border); background: var(--surface); }
 
 /* ==================== TUTORIAL ==================== */
-/* Wrapper spans the whole screen so the card can bottom-anchor itself, but
-   only the card opts in to pointer events — the tutorial must never block
-   the player from dragging on the canvas beneath it. */
+/* A row at the TOP of the bottom stack, not a free-floating overlay with a
+   magic 100px bottom padding. The old offset was a guess at the toolbar's
+   height; in the stack the card simply cannot reach the controls it is
+   describing, whatever the toolbar reflows to. Only the card itself takes
+   pointer events — the player must be able to keep dragging beside it. */
+/* The tutorial is the ONLY row in the stack allowed to shrink — see the flex
+   weights just below. Everything else would clip a control if it gave way. */
 #tutorial {
-  position: absolute;
-  inset: 0;
   display: flex;
-  align-items: flex-end;
   justify-content: center;
-  padding: 0 16px calc(100px + env(safe-area-inset-bottom, 0px));
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
   pointer-events: none;
 }
+#build-hint, #toolbar, #sim-controls { flex: 0 0 auto; }
 .tut-card {
   width: min(420px, 92vw);
+  /* Caps against the stack, and the stack caps against the viewport, so on a
+     short screen the card gives up height rather than pushing the toolbar off.
+     The card is a flex COLUMN and only #tut-text scrolls: capping the card as a
+     whole and letting it scroll (which was tried) cuts SKIP and GOT IT off the
+     bottom, and a tutorial you cannot dismiss is worse than one you cannot
+     finish reading. */
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -674,25 +843,122 @@ html, body {
   box-shadow: var(--shadow);
   animation: tut-in 0.3s ease;
 }
-.tut-step { display: block; font-size: 10px; letter-spacing: 0.12em; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
-#tut-title { font-size: clamp(15px, 4vw, 18px); margin-bottom: 4px; }
-#tut-text { font-size: clamp(12px, 3.4vw, 14px); color: var(--text-dim); line-height: 1.4; }
-.tut-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.tut-step { display: block; font-size: 10px; letter-spacing: 0.12em; color: var(--accent); font-weight: 700; margin-bottom: 4px; flex: 0 0 auto; }
+#tut-title { font-size: clamp(15px, 4vw, 18px); margin-bottom: 4px; flex: 0 0 auto; }
+#tut-text {
+  font-size: clamp(12px, 3.4vw, 14px);
+  color: var(--text-dim);
+  line-height: 1.4;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;                 /* the copy scrolls; the buttons never move */
+  -webkit-overflow-scrolling: touch;
+}
+.tut-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex: 0 0 auto; }
 .tut-dots { display: flex; gap: 5px; flex: 1 1 auto; }
 .tut-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); display: block; }
 .tut-dots span.on { background: var(--accent); }
 @keyframes tut-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 
-/* ==================== RESPONSIVE (≥720px) ==================== */
+/* ==================== RESPONSIVE ==================== */
+
+/* ---- TOOLBAR: ONE ROW ----
+   Two very different viewports want the same shape. A tablet/desktop has the
+   width to spare, and a LANDSCAPE PHONE has no height to spare — three stacked
+   rows would eat half of a 390px-tall screen. So: materials | tools | RELEASE
+   on a single line.
+
+   The flex weights are the guarantee the old layout never had. #material-strip
+   is the only flexible item (flex:1 1 auto, min-width:0); the tool cluster and
+   the release button are flex:0 0 auto. Squeeze the viewport and the MATERIALS
+   give up space and scroll — the tools and the release button cannot be shrunk,
+   cannot be pushed off the edge, and cannot end up underneath each other.
+
+   The 560px floor on the short-viewport arm matters: without it a hypothetical
+   320×500 window would take the one-row branch, where tools + release are
+   wider than the screen. Every real landscape phone clears 560px. */
+@media (min-width: 640px), (max-height: 520px) and (min-width: 560px) {
+  #toolbar { flex-direction: row; align-items: flex-end; gap: 10px; }
+  /* 0 1 auto, not 1 1 auto: the strip may SHRINK (that is the whole point — it
+     is the designated loser when space runs out) but must not GROW, or on a
+     wide desktop it stretches and shoves the tool cluster halfway across the
+     screen, away from the materials it belongs beside. */
+  #material-strip { flex: 0 1 auto; }
+  #btn-release { width: auto; flex: 0 0 auto; margin-left: auto; }
+}
+
+/* ---- SHORT VIEWPORT (landscape phones) ----
+   Every vertical pixel here is one the player cannot see the valley through, so
+   this block is a height budget: fold the material head-rating line onto the
+   cost line, tighten paddings, pull the toast and the menu button up under a
+   shorter top bar. Touch targets stay at 44px — that minimum is never the thing
+   that gets sacrificed. */
+@media (max-height: 520px) {
+  :root { --hud-menu-top: 54px; }                     /* the top bar is shorter here */
+  #hud-top { padding: 6px clamp(8px, 2.5vw, 14px); }
+  #hud-toast { top: calc(env(safe-area-inset-top, 0px) + 46px); }
+  #objective-meter, #budget-meter { display: none; }  /* the numbers carry it */
+
+  #hud-bottom { gap: 6px; padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
+  #toolbar { gap: 8px; }
+  #material-strip { padding: 3px 2px; }
+  /* THE FOLD: the material button stops being a four-line column and becomes a
+     2×2 grid — swatch beside the name, price beside the head rating. Measured on
+     a 844×303 viewport: 68px tall unfolded, 52px folded, and the 44px touch
+     minimum still governs the rest. It is done here in CSS, with the four spans
+     left as direct children of the button, precisely so the markup hud.js emits
+     does not have to change shape with the viewport. */
+  .mat-btn {
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-areas: "sw name" "cost head";
+    align-items: center;
+    justify-items: center;
+    column-gap: 5px;
+    row-gap: 1px;
+    padding: 4px 8px;
+  }
+  .mat-swatch { grid-area: sw; width: 13px; height: 13px; }
+  .mat-name { grid-area: name; font-size: 10px; letter-spacing: 0; }
+  .mat-cost { grid-area: cost; font-size: 9px; }
+  .mat-head { grid-area: head; font-size: 9px; }
+  #btn-release { font-size: 14px; padding: 11px 18px; }
+
+  .tut-card { padding: 10px 12px; }
+  .tut-foot { margin-top: 8px; }
+  .screen { gap: 8px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .end-card { padding: 12px 16px; }
+  .end-stats { margin: 7px 0; padding-top: 7px; gap: 4px 14px; }
+  #result-heading { font-size: clamp(18px, 4.4vw, 22px); }
+  #level-grid { gap: 8px; }
+  .level-card { min-height: 52px; padding: 8px 12px; }
+}
+
+/* ---- RESULT CARD ON A SHORT, WIDE VIEWPORT (landscape phone) ----
+   The card is a tall single column: heading, cause, note, SEVEN stat rows,
+   four buttons. On a 303px-tall viewport that is 427px of card, and while the
+   screen scrolls (so nothing is unreachable) RETRY — the thing the player wants
+   — starts below the fold, which is a bad enough failure on a result screen to
+   be worth its own layout. Widen the card and pair the stats up two-across:
+   seven rows become four, and the whole card lands inside the fold. */
+@media (max-height: 560px) and (min-width: 560px) {
+  .end-card { width: min(700px, 94vw); max-width: 94vw; }
+  .end-stats { grid-template-columns: 1fr auto 1fr auto; }
+  .result-btns { gap: 8px; }
+}
+
+/* ---- VERY NARROW (≤ 379px) ----
+   6 tool buttons at 44px need 294px with 6px gaps; a 320px viewport has 300px
+   inside the stack's padding. Tighten the gaps and the padding so the cluster
+   still fits on ONE row with room to spare, rather than scrolling. */
+@media (max-width: 379px) {
+  #hud-bottom { padding-inline: 8px; }
+  #tool-group { gap: 4px; }
+  .tool-sep { margin-inline: 0; }
+}
+
 @media (min-width: 720px) {
-  #level-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: 60vh; }
-  .level-sub { flex-basis: auto; margin-left: 0; }
-
-  /* plenty of room at this width — let the toolbar and sim row breathe
-     instead of scrolling */
-  #toolbar { max-width: calc(100vw - 220px); }
-  #sim-controls { max-width: calc(100vw - 40px); }
-
+  #level-grid { max-height: 60vh; }
   .big-btn { padding: 16px 40px; }
   .end-card { padding: 32px 40px; }
 }
@@ -705,8 +971,8 @@ html, body {
   .big-btn.release:hover { background: var(--release-bg-hot); }
   .primary-btn:hover { background: var(--accent); filter: brightness(1.1); }
   .ghost-btn:hover { background: var(--surface-2); color: var(--text); }
-  .level-card:not(:disabled):hover { border-color: var(--accent); transform: translateY(-1px); }
-  .level-card.locked:hover, .level-card:disabled:hover { border-color: var(--border-strong); transform: none; }
+  .level-card:not([aria-disabled="true"]):hover { border-color: var(--accent); transform: translateY(-1px); }
+  .level-card[aria-disabled="true"]:hover { border-color: var(--border-strong); transform: none; }
 }
 
 /* ==================== REDUCED MOTION ==================== */

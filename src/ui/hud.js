@@ -26,7 +26,7 @@ const last = {
   budgetPct: -1, budgetLow: null, timer: '', urgent: null, hint: '', hintKind: '',
   matList: '', matActive: '', matAfford: '', tool: '', undo: null, redo: null,
   speed: -1, load: '', retained: '', objPct: -1, objBad: null, release: null,
-  showTimer: null,
+  showTimer: null, fadeL: null, fadeR: null,
 };
 
 let lastToast = 0;
@@ -38,7 +38,8 @@ export function init() {
     'objective-meter', 'objective-fill', 'hud-timer', 'timer-text',
     'hud-right', 'hud-budget', 'budget-left', 'budget-total', 'budget-meter',
     'budget-fill', 'hud-readouts', 'stat-load', 'stat-retained', 'hud-toast',
-    'toolbar', 'material-bar', 'tool-group', 'btn-erase', 'btn-undo', 'btn-redo',
+    'toolbar', 'material-strip', 'material-bar', 'tool-group',
+    'btn-tool-build', 'btn-erase', 'btn-boxdelete', 'btn-undo', 'btn-redo',
     'btn-clear', 'sim-controls', 'btn-sim-retry', 'btn-sim-edit', 'btn-release',
     'btn-hud-menu', 'build-hint',
   ];
@@ -48,13 +49,31 @@ export function init() {
   bind(D['btn-sim-retry'], () => emit('ui:retry', {}));
   bind(D['btn-sim-edit'], () => emit('ui:edit', {}));
   bind(D['btn-hud-menu'], () => emit('ui:menu', {}));
+  // The three MODE buttons all speak the same event; builder.setTool() treats a
+  // repeat of the active non-build tool as "turn it off", which is why the
+  // explicit build button exists at all — it is the one unambiguous way back.
+  bind(D['btn-tool-build'], () => emit('ui:tool', { id: 'build' }));
   bind(D['btn-erase'], () => emit('ui:tool', { id: 'erase' }));
+  bind(D['btn-boxdelete'], () => emit('ui:tool', { id: 'boxdelete' }));
   bind(D['btn-undo'], () => emit('ui:undo', {}));
   bind(D['btn-redo'], () => emit('ui:redo', {}));
   bind(D['btn-clear'], () => emit('ui:clear', {}));
 
   for (const b of document.querySelectorAll('.speed-btn')) {
     b.addEventListener('click', () => emit('ui:speed', { v: parseFloat(b.dataset.speed) }));
+  }
+
+  // Scroll affordance for the material strip. Measured on the events that can
+  // actually change the answer — never per frame: reading scrollWidth forces a
+  // layout flush, which is exactly the kind of thing that shows up as jank on a
+  // phone at 60 Hz.
+  const strip = D['material-strip'];
+  if (strip && typeof strip.addEventListener === 'function') {
+    strip.addEventListener('scroll', stripFade, { passive: true });
+  }
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('resize', stripFade);
+    window.addEventListener('orientationchange', stripFade);
   }
 
   on('level:win', () => toast('DAM HELD', 'win'));
@@ -66,6 +85,20 @@ export function init() {
 
 function bind(node, fn) {
   if (node) node.addEventListener('click', fn);
+}
+
+// A clipped material strip has to LOOK clipped, or the player concludes there
+// are only three materials. Fade the edge the content is hidden behind — and
+// only that edge, so the fade doubles as a direction cue.
+function stripFade() {
+  const s = D['material-strip'];
+  if (!s) return;
+  const max = s.scrollWidth - s.clientWidth;       // NaN under the test stub
+  const pos = s.scrollLeft || 0;
+  const l = max > 2 && pos > 2;
+  const r = max > 2 && pos < max - 2;
+  if (last.fadeL !== l) { last.fadeL = l; s.classList.toggle('fade-l', l); }
+  if (last.fadeR !== r) { last.fadeR = r; s.classList.toggle('fade-r', r); }
 }
 
 // ---- formatting ---------------------------------------------------------
@@ -133,6 +166,18 @@ export function update(S) {
       D['sim-controls'].classList.toggle('hidden', build);
       D['hud-readouts'].classList.toggle('hidden', build);
       D['objective-meter'].classList.toggle('hidden', build);
+      // The strip has no measurable width while the toolbar is display:none, so
+      // the fade has to be re-derived the moment it becomes visible again.
+      if (build) stripFade();
+      // updateHint() only runs in the build phase, so without this the LAST
+      // build hint ("the gap between the banks is too wide…") stayed on screen
+      // through the whole sim, advising the player about a dam they have already
+      // released. Harmless when the hint was a floating overlay; now that it is
+      // a row in the bottom stack it also costs height for nothing.
+      else if (D['build-hint']) {
+        D['build-hint'].classList.add('hidden');
+        last.hint = null; last.hintKind = null;
+      }
     }
     last.phase = S.phase;
     last.hint = null;               // force a hint refresh on phase change (any
@@ -265,6 +310,12 @@ function updateMaterials(S, left) {
 
       // '~3 m head', not '~3 m': these buttons already talk in metres (maxLength
       // is a metre figure too), and a bare number reads as a length limit.
+      //
+      // All four children stay DIRECT children of the button. A short viewport
+      // folds the cost and the rating onto one line, but it does that by
+      // re-laying the button out as a 2×2 grid in CSS (styles.css) rather than
+      // by wrapping them in a container here: this DOM shape is part of the
+      // file's contract with tests/ui-feedback.mjs, and layout is CSS's job.
       if (rated) {
         const rating = document.createElement('span');
         rating.className = 'mat-head';
@@ -276,6 +327,7 @@ function updateMaterials(S, left) {
       btn.addEventListener('click', () => emit('ui:material', { id }));
       bar.appendChild(btn);
     });
+    stripFade();      // the strip's scrollable width just changed
   }
 
   const active = getBuilder().material;
@@ -299,12 +351,25 @@ function updateMaterials(S, left) {
   }
 }
 
+// The three mode buttons are a radio group in everything but markup: exactly one
+// is lit, always, so "which tool am I holding" is answerable at a glance. The
+// player who did not know an eraser existed was looking at a cluster that had
+// scrolled off the right edge of the screen AND, when it was on screen, only
+// ever lit ONE of its buttons — there was no state to read.
+//
+// Keyed by builder.js's B.tool values, so an unknown tool lights nothing rather
+// than lighting the wrong thing.
+const TOOL_BTN = { build: 'btn-tool-build', erase: 'btn-erase', boxdelete: 'btn-boxdelete' };
+
 function updateTools() {
-  const B = getBuilder();
-  const erasing = B.tool === 'erase';
-  if (last.tool !== B.tool) {
-    last.tool = B.tool;
-    D['btn-erase'].classList.toggle('active', erasing);
+  const B = getBuilder() || {};
+  const tool = B.tool || 'build';
+  if (last.tool !== tool) {
+    last.tool = tool;
+    for (const id in TOOL_BTN) {
+      const node = D[TOOL_BTN[id]];
+      if (node) node.classList.toggle('active', tool === id);
+    }
   }
   const u = canUndo();
   if (last.undo !== u) { last.undo = u; D['btn-undo'].disabled = !u; }

@@ -397,12 +397,31 @@ export const CONFIG = {
     selectColor: '#ffffff',
     selectPx: 3,
 
+    // ---- box-delete marquee (build tool, drawn by renderer.drawMarquee) ----
+    // The rect is a PREVIEW of a destructive action, so it is drawn in the
+    // danger family and nothing else in the build phase uses that family — a
+    // player cannot mistake it for the build zone (blue) or a ghost (green).
+    marqueeFill: 'rgba(255, 90, 60, 0.09)',
+    marqueeLine: '#ff6a5a',
+    marqueeDash: [7, 5],            // its own dash, tighter than R.dash, so the
+                                    // marquee edge does not read as a zone edge
+    marqueeHitColor: '#ff5a3c',
+    marqueeHitAlpha: 0.5,           // halo behind a member the box has caught
+    marqueeHitDashAlpha: 0.9,       // dashed overstroke on the member itself
+    marqueeCursorPx: 11,            // half-size of the idle box-delete cursor
+    marqueeMinPx: 3,                // below this the rect is a click, not a box
+
     // ghost + labels
     ghostOk: '#7fff9a',
     ghostBad: '#ff6a5a',
     ghostAlpha: 0.75,
     labelFontPx: 12,
     labelPadPx: 5,
+    // CSS px from the top of the canvas to the BUILD ZONE / PROTECT captions.
+    // They used to sit at 22 device px, which on a phone is under the HUD's top
+    // row — on a narrow countdown level the caption printed straight through the
+    // flood timer. This clears the whole top row in both orientations.
+    zoneLabelTopPx: 76,
     labelBg: 'rgba(8, 18, 26, 0.86)',
     labelFg: '#dfe9f0',
 
