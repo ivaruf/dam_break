@@ -10,6 +10,8 @@ import {
   avgLoad, memberById,
 } from './harness.js';
 import { volumeBetween, velAt, depthAt, totalVolume } from '../src/physics/water.js';
+import { memberCapacity } from '../src/physics/structures.js';
+import { MATERIALS } from '../src/build/materials.js';
 import { LEVELS } from '../src/levels/levels.js';
 import { CONFIG } from '../src/config.js';
 
@@ -53,6 +55,41 @@ const A = {
   cableSlackFrac: 0.99,    // taut length fraction below which it counts as slack
   cableStretchTol: 3,      // allowed stretch as a multiple of the tension limit
   cableSquashTol: 0.05,    // m of separation growth allowed for a squashed cable
+
+  // --- v2.1 damage model: CREEP -----------------------------------------
+  creepTarget: 0.85,       // load the rig holds a member at, indefinitely
+  creepRamp: 3,            // s to fade the pull in (a step load would ring the
+                           // member past its limit and break it on impact)
+  creepBand: 0.06,         // measured load must sit this close to creepTarget,
+                           // otherwise the rig is not testing what it claims
+  creepSettle: 6,          // s before the load band is sampled
+  creepFailMin: 15,        // s: timber must not give way before this
+  creepFailMax: 45,        // s: ...nor hold past this
+  creepSurvive: 90,        // s the identical rig in steel must last
+  creepSurviveDmg: 0.3,    // ...having eaten less than this much of itself
+
+  // --- v2.1 damage model: BENDING ---------------------------------------
+  bendHead: 2.5,           // m of head the long-span/pier comparison runs at
+  bendSpan: 4.8,           // m of UNSUPPORTED face panel (the whole face, 1 bay)
+  bendWidth: 1.2,          // m truss depth: keeps the 4.8 m bay's diagonal
+                           // (4.95 m) inside timber's 5 m maxLength, so the
+                           // scene is something a player could actually build
+  bendSecs: 60,
+  bendMomentHead: 2,       // m: a head BOTH faces survive, so their bending can
+                           // be compared as numbers rather than as verdicts
+  bendMomentFrac: 0.6,     // piered bendLoad / long-span bendLoad at that head.
+                           // Theory says 0.5 (halve the span, halve the moment).
+
+  // --- v2.1 damage model: HEAD RATINGS ----------------------------------
+  rateBay: 2.5,            // m: the level-typical bay the ratings are quoted for
+  rateWidth: 1.5,          // m truss depth (rung 1.5 m, diagonal 2.92 m — inside
+                           // concrete's 3 m maxLength, so all three materials
+                           // build the SAME face and the comparison is fair)
+  rateFreeboard: 1.5,      // m of face above the water (no overtopping)
+  rateSurviveSecs: 60,
+  rateFailSecs: 25,        // every failure below lands inside 9 s
+  rateSurviveDmg: 0.6,     // a face that "survives" may be creeping, but it must
+                           // not be most of the way through its own life
 };
 
 function printSuite(t) {
@@ -614,6 +651,196 @@ function debris() {
   return printSuite(t);
 }
 
+// ---- v2.1 damage model: bending + creep ----------------------------------
+
+// One braced face standing on flat ground against a still reservoir. `bay` is
+// the row pitch, i.e. the length of each unsupported face panel — the quantity
+// bending actually cares about. The water is seeded clear of the dam's own solid
+// cells: particles started INSIDE a capsule squirt out and slam the face, which
+// is a measurement artefact and not a flood.
+function faceProbe({ mat, head, bay, width, seconds, height }) {
+  const wallX = 24;
+  const h = height != null ? height : Math.ceil((head + A.rateFreeboard) / bay) * bay;
+  const wall = buildWall({
+    x: wallX, base: 0, height: h, width, mat, spacing: bay, braced: true, idPrefix: 'r',
+  });
+  const ctx = buildScene({
+    terrain: [[0, 0], [60, 0]], anchors: wall.anchorPoints,
+    testDesign: { nodes: wall.nodes, members: wall.members },
+    water: {
+      initial: [{
+        x0: 0,
+        x1: wallX - width / 2 - MATERIALS[mat].thickness / 2 - 0.35,
+        surface: head,
+      }],
+    },
+  });
+  const rec = createRecorder();
+  let peakBend = 0, dmg = 0, ssBend = 0, ssN = 0;
+  runSim(ctx, seconds, {
+    recorder: rec,
+    onTick: (time) => {
+      let mb = 0;
+      for (const m of ctx.structure.members) {
+        if (m.broken) continue;
+        if (m.bendLoad > mb) mb = m.bendLoad;
+        if (m.damage > dmg) dmg = m.damage;
+      }
+      if (mb > peakBend) peakBend = mb;
+      if (time > seconds - 5) { ssBend += mb; ssN++; }
+    },
+  });
+  rec.stop();
+  return {
+    mat, head, bay, height: h, members: ctx.structure.members.length,
+    broken: ctx.structure.brokenCount,
+    firstFailure: ctx.structure.firstFailure,
+    breaks: rec.breaks, peakBend, dmg,
+    ssBend: ssN ? ssBend / ssN : 0,
+  };
+}
+
+// Bending must be about SPAN, not about depth. The same 4.8 m face, the same
+// water: as one unsupported panel it snaps; with a pier at mid-height (two 2.4 m
+// panels) it holds. The peak moment of a span is F·L/8 and F grows with L too,
+// so halving the bay cuts the moment to about half at equal head.
+function bending() {
+  const t = createSuite('bending -- long unsupported span vs a mid-span pier');
+  const span = A.bendSpan, w = A.bendWidth, secs = A.bendSecs;
+  const longT = faceProbe({ mat: 'timber', head: A.bendHead, bay: span, width: w, seconds: secs, height: span });
+  const pierT = faceProbe({ mat: 'timber', head: A.bendHead, bay: span / 2, width: w, seconds: secs, height: span });
+  const longS = faceProbe({ mat: 'steel', head: A.bendHead, bay: span, width: w, seconds: secs, height: span });
+
+  console.log(`  ${span}m timber span: broken=${longT.broken} peakBend=${longT.peakBend.toFixed(2)}`
+    + ` | ${span / 2}m piered: broken=${pierT.broken} peakBend=${pierT.peakBend.toFixed(2)} dmg=${pierT.dmg.toFixed(3)}`
+    + ` | ${span}m steel: broken=${longS.broken} peakBend=${longS.peakBend.toFixed(2)} dmg=${longS.dmg.toFixed(3)}`);
+
+  t.gt(longT.broken, 0, `the ${span} m unsupported timber panel fails under ${A.bendHead} m of head`);
+  const ff = longT.firstFailure;
+  t.eq(ff && ff.mode, 'bending', "...and firstFailure.mode says 'bending'");
+  t.ok(longT.breaks.some((b) => b.mode === 'bending'), "member:break carries mode 'bending'",
+    `modes=${[...new Set(longT.breaks.map((b) => b.mode))].join(',') || 'none'}`);
+  t.eq(pierT.broken, 0, 'the SAME span with a mid pier survives the same water');
+  t.lt(pierT.dmg, A.rateSurviveDmg, '...and is not quietly creeping to death either');
+  t.eq(longS.broken, 0, 'the same long span in steel survives (material matters too)');
+
+  // moment comparison at a head both faces survive: the pier must roughly halve it
+  const mLong = faceProbe({ mat: 'timber', head: A.bendMomentHead, bay: span, width: w, seconds: 20, height: span });
+  const mPier = faceProbe({ mat: 'timber', head: A.bendMomentHead, bay: span / 2, width: w, seconds: 20, height: span });
+  console.log(`  at ${A.bendMomentHead} m head: long span bendLoad ${mLong.ssBend.toFixed(3)},`
+    + ` piered ${mPier.ssBend.toFixed(3)} (ratio ${(mPier.ssBend / mLong.ssBend).toFixed(2)})`);
+  t.eq(mLong.broken + mPier.broken, 0, `both faces survive ${A.bendMomentHead} m (so the moments are comparable)`);
+  t.lt(mPier.ssBend / mLong.ssBend, A.bendMomentFrac,
+    'halving the bay cuts the settled bending load to well under the long span\'s');
+  return printSuite(t);
+}
+
+// Head ratings: the depth at which each material's face stops being a dam. The
+// SAME braced face for all three (rung 1.5 m, diagonal 2.92 m, bay 2.5 m — a
+// geometry every material can legally build), so the only variable is material.
+const RATINGS = [
+  { mat: 'timber', survive: 2.5, fail: 4.5 },
+  { mat: 'steel', survive: 5.5, fail: 9.0 },
+  { mat: 'concrete', survive: 8.0, fail: null },
+];
+
+function ratings() {
+  const t = createSuite('ratings -- metres of head each material actually holds');
+  const bay = A.rateBay, width = A.rateWidth;
+  for (const r of RATINGS) {
+    const ok = faceProbe({ mat: r.mat, head: r.survive, bay, width, seconds: A.rateSurviveSecs });
+    console.log(`  ${r.mat}: ${r.survive} m -> broken=${ok.broken} peakBend=${ok.peakBend.toFixed(2)}`
+      + ` settledBend=${ok.ssBend.toFixed(2)} dmg=${ok.dmg.toFixed(3)}`
+      + ` (headRating ${MATERIALS[r.mat].headRating} m)`);
+    t.eq(ok.broken, 0, `${r.mat} face holds ${r.survive} m of head for ${A.rateSurviveSecs} s`);
+    t.lt(ok.dmg, A.rateSurviveDmg, `${r.mat} at ${r.survive} m is not creeping to death`);
+    if (r.fail == null) continue;
+    const bad = faceProbe({ mat: r.mat, head: r.fail, bay, width, seconds: A.rateFailSecs });
+    const ffm = bad.firstFailure ? bad.firstFailure.mode : 'none';
+    console.log(`  ${r.mat}: ${r.fail} m -> broken=${bad.broken} first=${ffm}`
+      + `@${bad.firstFailure ? bad.firstFailure.time.toFixed(1) : '-'}s`);
+    t.gt(bad.broken, 0, `${r.mat} face fails at ${r.fail} m of head`);
+  }
+
+  // The ordering is the point: at 8 m, steel is gone and concrete is standing.
+  const steelDeep = faceProbe({ mat: 'steel', head: 8, bay, width, seconds: A.rateFailSecs });
+  t.gt(steelDeep.broken, 0, 'steel face fails at 8 m, where the concrete one held');
+  t.ok(MATERIALS.timber.headRating < MATERIALS.steel.headRating
+    && MATERIALS.steel.headRating < MATERIALS.concrete.headRating,
+    'published headRatings are ordered timber < steel < concrete',
+    `${MATERIALS.timber.headRating} < ${MATERIALS.steel.headRating} < ${MATERIALS.concrete.headRating}`);
+  return printSuite(t);
+}
+
+// Sustained load is not survival. A member held at 0.85 for long enough dies of
+// creep alone, and how long that takes IS the material's character: timber goes
+// in half a minute, steel takes twenty times longer, concrete longer still.
+// The rig is one member pulled by a constant force sized from its own capacity,
+// so every material is held at the SAME fraction of its limit — the only thing
+// being compared is creepRate. Gravity on the free node is cancelled so the pull
+// stays purely axial, and it fades in over creepRamp seconds because a step load
+// would ring the member straight past its limit and break it on impact.
+function creepRig(mat, seconds) {
+  const cap = memberCapacity(MATERIALS[mat], true);
+  const force = cap * A.creepTarget;
+  const ctx = buildScene({
+    terrain: [[0, 0], [30, 0]], anchors: [[10, 6]],
+    testDesign: {
+      nodes: [{ id: 'A', x: 10, y: 6, anchorId: 'a0' }, { id: 'B', x: 13, y: 6, anchorId: null }],
+      members: [{ id: 'm', a: 'A', b: 'B', mat }],
+    },
+    water: {},
+  });
+  const rec = createRecorder();
+  const m = ctx.structure.members[0];
+  const b = ctx.structure.nodes[1];
+  let lo = Infinity, hi = 0, brokeAt = null;
+  runSim(ctx, seconds, {
+    recorder: rec,
+    onTick: (time) => {
+      if (m.broken) { if (brokeAt === null) brokeAt = time; return; }
+      b.fx += force * Math.min(1, time / A.creepRamp);
+      b.fy += CONFIG.physics.gravity * b.mass;
+      if (time > A.creepSettle) { if (m.load < lo) lo = m.load; if (m.load > hi) hi = m.load; }
+    },
+  });
+  rec.stop();
+  return {
+    mat, force, brokeAt, damage: m.damage, loadLo: lo, loadHi: hi,
+    firstFailure: ctx.structure.firstFailure, breaks: rec.breaks,
+  };
+}
+
+function creep() {
+  const t = createSuite('creep -- sustained near-limit load destroys weak material');
+  const tim = creepRig('timber', A.creepSurvive + 20);
+  console.log(`  timber held at ${tim.loadLo.toFixed(3)}..${tim.loadHi.toFixed(3)}`
+    + ` -> broke at ${tim.brokeAt === null ? 'never' : tim.brokeAt.toFixed(1) + 's'}`);
+  t.ok(Math.abs(tim.loadHi - A.creepTarget) < A.creepBand && Math.abs(tim.loadLo - A.creepTarget) < A.creepBand,
+    `the rig really holds timber at ${A.creepTarget}`, `${tim.loadLo.toFixed(3)}..${tim.loadHi.toFixed(3)}`);
+  t.ok(tim.brokeAt !== null && tim.brokeAt > A.creepFailMin && tim.brokeAt < A.creepFailMax,
+    `timber at ${A.creepTarget} dies of creep between ${A.creepFailMin} and ${A.creepFailMax} s`,
+    `${tim.brokeAt === null ? 'never' : tim.brokeAt.toFixed(1) + 's'}`);
+  t.eq(tim.firstFailure && tim.firstFailure.sustained, true, 'firstFailure.sustained is true (load was under 1.0)');
+  t.ok(tim.breaks.length > 0 && tim.breaks[0].sustained === true,
+    'member:break carries sustained:true', `payload=${JSON.stringify(tim.breaks[0] && tim.breaks[0].sustained)}`);
+  t.lt(tim.breaks[0] ? tim.breaks[0].load : 9, 1, 'the break load really was under 1.0 (attrition, not overload)');
+
+  const ste = creepRig('steel', A.creepSurvive);
+  console.log(`  steel held at ${ste.loadLo.toFixed(3)}..${ste.loadHi.toFixed(3)}`
+    + ` -> damage ${ste.damage.toFixed(3)} after ${A.creepSurvive}s`);
+  t.eq(ste.brokeAt, null, `the identical rig in steel survives ${A.creepSurvive} s`);
+  t.lt(ste.damage, A.creepSurviveDmg, `...with damage under ${A.creepSurviveDmg}`);
+  t.gt(ste.damage, 0, '...but it is NOT immune either (steel creeps, just slowly)');
+
+  const con = creepRig('concrete', A.creepSurvive);
+  console.log(`  concrete -> damage ${con.damage.toFixed(3)} after ${A.creepSurvive}s`);
+  t.eq(con.brokeAt, null, `concrete survives ${A.creepSurvive} s too`);
+  t.gt(con.damage, 0, 'concrete is slow, not immortal');
+  t.lt(con.damage, ste.damage, 'concrete creeps slower than steel');
+  return printSuite(t);
+}
+
 // The game happily releases the water with nothing built, and levels get retried
 // mid-collapse. Neither may produce NaN or lose water.
 function robustness() {
@@ -713,6 +940,9 @@ const extras = [
   ['FOUNDATIONS', foundations],
   ['CABLES', cables],
   ['DEBRIS', debris],
+  ['BENDING', bending],
+  ['RATINGS', ratings],
+  ['CREEP', creep],
 ];
 let extrasFailed = 0;
 if (!only) {

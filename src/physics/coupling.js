@@ -25,6 +25,9 @@
 //   (stopping a front costs an impulse, which the solve turns into a pressure
 //   spike) both come out of the same term. Nothing is scripted.
 //   Buoyancy + drag on submerged nodes and debris still ride the velocity field.
+//   v2.1: the same per-member force is PUBLISHED on the member as waterFx /
+//   waterFy / waterFperp (component perpendicular to the axis) so stress.js can
+//   bend it and the renderer can bow it. See the sign convention below.
 
 import { CONFIG } from '../config.js';
 import { emit } from '../core/events.js';
@@ -278,9 +281,28 @@ export function applyWaterForces(structure, water, dt) {
     ST.fxS[mi] += (ST.fxRaw[mi] - ST.fxS[mi]) * aF;
     ST.fyS[mi] += (ST.fyRaw[mi] - ST.fyS[mi]) * aF;
     const m = members[mi];
-    if (m.broken) continue;
+    if (m.broken) { m.waterFx = 0; m.waterFy = 0; m.waterFperp = 0; continue; }
     const fx = ST.fxS[mi] * scale;
     const fy = ST.fyS[mi] * scale * C.verticalScale;
+
+    // PUBLISHED per-member water load (ARCHITECTURE §5 v2.1). stress.js turns
+    // waterFperp into bending; the renderer bows the member the other way.
+    // Both are the EMA-smoothed force in game newtons — the same value the
+    // nodes receive below, so what bends a member is exactly what pushes it.
+    // SIGN CONVENTION: the perpendicular is the member axis a→b rotated +90°
+    // (counter-clockwise), n = (−uy, ux). waterFperp > 0 therefore means the
+    // water pushes toward that left-hand side of a→b, so for a vertical face
+    // member built bottom→top (a low, b high) a downstream (+x) push reads
+    // NEGATIVE. Only the magnitude enters bendLoad; the sign is for the
+    // renderer's bow direction and for anyone asking which side is loaded.
+    m.waterFx = fx;
+    m.waterFy = fy;
+    const pdx = m.b.x - m.a.x, pdy = m.b.y - m.a.y;
+    const plen = Math.hypot(pdx, pdy);
+    // A member that has never been wet has fxS exactly 0, so it reports exactly
+    // zero; one that just came out of the water decays away with forceTau.
+    m.waterFperp = plen > 1e-9 ? (fy * pdx - fx * pdy) / plen : 0;
+
     if (fx === 0 && fy === 0) continue;
     applyMemberForce(m, ST.appX[mi], ST.appY[mi], fx, fy);
 

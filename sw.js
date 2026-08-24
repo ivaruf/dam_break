@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.0.0'; // fluid overhaul: PIC/FLIP particle water, particle-true rendering
+const VERSION = 'v2.1.0'; // materials react: bending snaps long spans, creep eats sustained load
 const CACHE = `dambuilder-${VERSION}`;
 
 const ASSETS = [

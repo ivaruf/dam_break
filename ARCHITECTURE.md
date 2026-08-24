@@ -243,12 +243,17 @@ damage ≥ 1              break
 ```
 
 Coupling writes per-member lateral water force each tick: `m.waterFx`,
-`m.waterFy`, `m.waterFperp` (component ⊥ to member axis). stress.js sets
-`m.bendLoad` (kept separately for rendering: lateral bow ∝ bendLoad, direction
-opposite waterFx/waterFy). `firstFailure.mode` gains `'bending'`;
-`firstFailure.sustained` is true when the break's final load was < 1.0 (creep
-failure). Material schema gains `bending` (capacity), `creepRate` (damage/s at
-load 1.0), `headRating` (display-only meters of water head, shown in the HUD).
+`m.waterFy`, `m.waterFperp` (component ⊥ to member axis; + = left of a→b).
+stress.js sets `m.bendLoad` — an EMA (`CONFIG.damage.bendTau`, 0.15 s) of the
+instantaneous moment ratio, so the fluid's one-tick sim-start pressure
+transient can't decide a rating while a real wave (≥1 s) still registers.
+Rendering: lateral bow ∝ bendLoad, direction along waterFx/waterFy.
+`firstFailure.mode` gains `'bending'`; `firstFailure.sustained` and the
+`member:break` payload's `sustained` are set on EVERY break (true when the
+final load was < 1.0 — a creep failure; false for overload). Material schema
+gains `bending` (moment capacity, derived ∝ thickness² · tension),
+`creepRate` (damage/s at load 1.0), `headRating` (display-only meters, shown
+in the HUD; current: timber 3, steel 7, concrete 8, cable 0).
 
 On break: member.broken = true, spawn debris piece (Opus A), record
 firstFailure if null, return/emit `'member:break' {id, x, y, mode, matId}`.
@@ -263,7 +268,7 @@ import { on, off, emit } from '../core/events.js';
 
 | event            | payload                                        | emitter |
 |------------------|------------------------------------------------|---------|
-| `member:break`   | `{id, x, y, mode, matId, load}` (load = pre-break severity) | stress  |
+| `member:break`   | `{id, x, y, mode, matId, load, sustained}` (mode incl. 'bending'; load = pre-break severity; sustained = creep failure) | stress  |
 | `water:impact`   | `{x, y, speed, magnitude, dir}` (dir = ±1 flow sign) | coupling|
 | `breach`         | `{x, y, flow}` — re-fires ~every 0.3 s while flow lasts | coupling|
 | `overtop`        | `{x, flow}` — re-fires ~every 0.3 s while flow lasts | coupling|

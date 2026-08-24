@@ -28,7 +28,17 @@ const M = {
   collapseSince: -1,     // sim time the collapse threshold was first crossed
   overtopT: -1,
   breachT: -1,
+  overSince: -1,         // sim time the peak load first crossed the creep threshold
+  brk: null,             // first member:break payload (+ how long it had been hot)
 };
+
+// CONFIG.damage.creepStart is the physics threshold above which sustained load
+// starts eating a member. Read defensively: this file must still build a cause
+// line if the damage model is mid-integration and the key is absent.
+function creepStart() {
+  const d = CONFIG.damage || {};
+  return d.creepStart !== undefined ? d.creepStart : 0.7;
+}
 
 const cfg = () => CONFIG.build.modes;
 
@@ -37,6 +47,21 @@ export function getStats() { return M.stats; }
 export function initModes() {
   on('overtop', () => { if (M.stats && M.overtopT < 0) M.overtopT = getScene().simTime; });
   on('breach', () => { if (M.stats && M.breachT < 0) M.breachT = getScene().simTime; });
+  // The break EVENT carries two things structure.firstFailure does not: the load
+  // the member was actually carrying when it let go, and — via M.overSince — how
+  // long it had been carrying it. A creep failure's whole story is those two
+  // numbers, so they are captured here rather than reconstructed later.
+  on('member:break', (e) => {
+    if (!M.stats || M.brk || !e) return;
+    const t = getScene().simTime;
+    M.brk = {
+      id: e.id,
+      mode: e.mode || '',
+      sustained: !!e.sustained,
+      load: e.load > 0 ? e.load : -1,
+      heldFor: M.overSince >= 0 ? t - M.overSince : -1,
+    };
+  });
   on('sim:reset', () => { M.stats = null; M.done = false; });
 }
 
@@ -56,6 +81,7 @@ export function startSim(level, _prevStats) {
   M.zoneDepth = 0;
   M.badSince = -1; M.zoneBadSince = -1; M.collapseSince = -1;
   M.overtopT = -1; M.breachT = -1;
+  M.overSince = -1; M.brk = null;
   M.memberCount = S.design ? S.design.members.length : 0;
   M.stats = {
     retained: 1, peakDepth: 0, maxLoad: 0, brokenCount: 0,
@@ -110,6 +136,13 @@ export function update(dt) {
   if (S.structure) {
     st.maxLoad = Math.max(st.maxLoad, S.structure.maxLoad || 0);
     st.brokenCount = S.structure.brokenCount || 0;
+    // Creep only means anything as a DURATION ("held at 87% for 28 s"), and the
+    // cheapest honest source is the contract's own load number: when did this
+    // dam first go over the creep threshold. One comparison a tick, no reaching
+    // into the damage model.
+    if ((S.structure.maxLoad || 0) >= creepStart()) {
+      if (M.overSince < 0) M.overSince = t;
+    } else M.overSince = -1;
   }
 
   const obj = (M.level && M.level.objective) || { type: 'survive' };
@@ -218,6 +251,14 @@ function failureCause(st) {
   if (tOver < tBreak && tOver < tBreach) return 'OVERTOPPED — THE RESERVOIR ROSE OVER THE CREST';
   if (tBreach < tBreak) return 'BREACHED — WATER FOUND A WAY THROUGH';
   if (ff) {
+    // Two of the four failure modes are not events but processes, and they get
+    // their own stories: attrition (it held, and holding is what killed it) and
+    // bending (it was never crushed — it was pushed out of line and snapped in
+    // the middle). Attrition wins the tie, because "you were living on the edge
+    // for half a minute" is the more actionable of the two.
+    const brk = M.brk && M.brk.id === ff.memberId ? M.brk : null;
+    if (ff.sustained || (brk && brk.sustained)) return sustainedCause(st, ff, brk);
+    if (ff.mode === 'bending') return bendingCause(S, st, ff);
     const mode = ff.mode === 'tension' ? 'TENSION' : 'COMPRESSION';
     return `${memberLabel(S, ff)} — ${mode} LIMIT EXCEEDED at ${ff.time.toFixed(1)}s`;
   }
@@ -236,6 +277,50 @@ function retainCause(st, min, early) {
   if (hasEvent) return failureCause(st);
   if (early) return "BUDGET WASN'T THE PROBLEM — THE DAM SLID";
   return `ONLY ${pct(st.retained)}% RETAINED — ${pct(min)}% WAS NEEDED`;
+}
+
+// CREEP. The peak is not the point — the point is that the dam sat just under
+// the line for half a minute and lost anyway, which is a margin problem, not a
+// strength problem. So the line reports the load it was holding and for how long.
+function sustainedCause(st, ff, brk) {
+  const load = brk && brk.load > 0 ? brk.load : (st.maxLoad || 0);
+  const held = brk && brk.heldFor > 0 ? brk.heldFor
+    : (M.overSince >= 0 ? Math.max(0, ff.time - M.overSince) : ff.time);
+  return `GAVE WAY UNDER SUSTAINED LOAD — HELD AT ${pct(load)}% FOR ${Math.round(held)} s`;
+}
+
+// BENDING. Where it went (midspan) and what was leaning on it (deep water over a
+// long span). The span length is the number the player can actually act on: put
+// a pier under it, or spend on something stiffer.
+function bendingCause(S, st, ff) {
+  const span = memberSpan(S, ff.memberId);
+  const mat = span.matId && MATERIALS[span.matId] ? MATERIALS[span.matId].name.toUpperCase() : '';
+  const what = span.len > 0
+    ? `${span.len.toFixed(1)} m SPAN${mat ? ' OF ' + mat : ''}`
+    : (mat ? `A ${mat} SPAN` : 'AN UNSUPPORTED SPAN');
+  const depth = st.peakDepth > 0.1 ? `${st.peakDepth.toFixed(1)} m OF WATER` : 'DEEP WATER';
+  return `SNAPPED AT MIDSPAN — ${what} UNDER ${depth} at ${ff.time.toFixed(1)}s`;
+}
+
+// Span + material of the member that failed. restLength is the true span, so the
+// runtime member is preferred; the design geometry is the fallback (and the only
+// source left if the structure has been torn down since).
+function memberSpan(S, memberId) {
+  const st = S.structure;
+  if (st) {
+    for (const m of st.members) {
+      if (m.id !== memberId) continue;
+      const len = m.restLength > 0 ? m.restLength : Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y);
+      return { len, matId: m.mat ? m.mat.id : '' };
+    }
+  }
+  const design = S.design;
+  const dm = design ? design.members.find((x) => x.id === memberId) : null;
+  if (!dm) return { len: 0, matId: '' };
+  const byId = Object.create(null);
+  for (const n of design.nodes) byId[n.id] = n;
+  const a = byId[dm.a], b = byId[dm.b];
+  return { len: a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0, matId: dm.mat };
 }
 
 function collapseCause(st) {

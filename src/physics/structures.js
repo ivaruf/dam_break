@@ -73,6 +73,10 @@ function makeMember(id, a, b, mat) {
     load: 0,
     loadSign: 1,
     damage: 0,
+    // v2.1 water-load / bending fields. Declared here (not lazily by coupling)
+    // because the renderer and HUD read them during the BUILD phase, before any
+    // water tick has run — `undefined` there would put NaN in the bow geometry.
+    waterFx: 0, waterFy: 0, waterFperp: 0, bendLoad: 0,
     tensionOnly: !!(mat && mat.tensionOnly),
     sealing: !!(mat && mat.sealing && !mat.tensionOnly),
     compliance: memberCompliance(mat, restLength),
@@ -150,6 +154,7 @@ export function spawnDebris(structure, member) {
     restLength: member.restLength,
     broken: false,
     strain: 0, load: 0, loadSign: 1, damage: 0,
+    waterFx: 0, waterFy: 0, waterFperp: 0, bendLoad: 0,   // same reason as makeMember
     tensionOnly: false,
     sealing: false,
     compliance: memberCompliance(mat, member.restLength),

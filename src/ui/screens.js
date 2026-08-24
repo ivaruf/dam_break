@@ -191,6 +191,10 @@ function coaching(cause) {
   const c = String(cause || '').toUpperCase();
   if (c.indexOf('OVERTOP') >= 0) return 'The reservoir rose over your crest. Build higher, or give the water a spillway.';
   if (c.indexOf('BREACH') >= 0) return 'Water found a gap. Sealing beams must touch each other — cables seal nothing.';
+  // The two v2.1 processes come BEFORE the axial modes: a bending or creep break
+  // is not a tension/compression story, and the advice is completely different.
+  if (c.indexOf('SUSTAINED') >= 0) return 'It was holding right at the edge — sustained pressure eats weak material. Add margin, or build the wet face from something stronger.';
+  if (c.indexOf('MIDSPAN') >= 0) return 'Long spans snap in the middle — stand a pier under the face or use steel.';
   if (c.indexOf('TENSION') >= 0) return 'Something was pulled apart. Steel and cable are strongest in tension.';
   if (c.indexOf('COMPRESSION') >= 0) return 'Something was crushed. Shorten the span or brace it — long beams buckle.';
   if (c.indexOf('COLLAPSE') >= 0) return 'One failure took the rest with it. Triangulate so no single beam is critical.';

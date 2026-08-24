@@ -508,6 +508,18 @@ html, body {
 .mat-btn[data-mat="cable"] .mat-swatch { background: var(--mat-cable); }
 .mat-name { font-size: clamp(9px, 2.6vw, 11px); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
 .mat-cost { font-size: clamp(8px, 2.2vw, 10px); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+/* head rating — what this material BUYS you, so it is accent-coloured against
+   the dim cost line right above it: one row is a price, the other a capability.
+   Optional: hud.js only creates it when the material has a headRating, and the
+   column layout closes up on its own when it is absent. */
+.mat-head {
+  font-size: clamp(8px, 2.2vw, 10px);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+.mat-btn.unaffordable .mat-head { color: var(--text-dim); }
 .mat-key {
   position: absolute;
   top: 3px; right: 4px;

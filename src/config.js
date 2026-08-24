@@ -185,6 +185,50 @@ export const CONFIG = {
     hardBreak: 1.6,        // instant break at this load
     slenderness: 0.35,     // compression limit reduction k·(len/refLen)²
     slenderRefLen: 3.0,    // m
+
+    // --- v2.1 BENDING: a long unsupported span snaps under deep water ------
+    // bendLoad = |m.waterFperp| · len / (8 · bendScale · mat.bending)
+    // The numerator is the peak moment in a simply-supported span carrying a
+    // distributed transverse load (M = F·L/8), so the denominator is a MOMENT
+    // CAPACITY in game newton-metres: bendScale is the global scale and
+    // mat.bending the material's share of it (timber = 1.00).
+    //
+    // 1000 is set from the head ratings the design asks for. Hydrostatic force
+    // on a face is ½·pressureScale·ρ·g·H², so the bottom panel of a face with
+    // bays of length L under head H carries F ≈ 269·L·(2H−L) game newtons and
+    // therefore a moment of ≈ 34·L²·(2H−L). At bendScale 1000 a timber panel in
+    // the level-typical 2.5 m bay reaches its limit at H ≈ 3 m, steel at ≈ 7 m —
+    // exactly the published headRatings, and tests/run.js RATINGS gates them.
+    // Raising this makes every material tolerate longer unsupported spans;
+    // it does not touch axial strength at all.
+    bendScale: 1000,
+
+    // A span does not develop its full static moment from a load pulse shorter
+    // than its own response time — that is the dynamic load factor, and without
+    // it bending is decided by whichever single tick the pressure solve spiked
+    // on. m.bendLoad is therefore an EMA of the instantaneous moment ratio with
+    // this time constant, measured in seconds of SIM time (deterministic: it is
+    // a function of dt, never of frame rate).
+    //
+    // 0.15 s is chosen against the two pulses that matter. The reservoir's
+    // spin-up transient at sim start is ~0.4 s wide and hands a face 10–19x its
+    // hydrostatic load (a property of the fluid's first half-second, not of the
+    // dam); at 0.15 s it is attenuated to ~0.6, enough that a correctly built
+    // concrete face is not destroyed by tick 20. A real wave impact loads a face
+    // for a second or more and still registers ~85–90% — so a flood front's
+    // bending spike absolutely does still snap a long span. Set 0 to disable.
+    bendTau: 0.15,
+
+    // --- v2.1 CREEP: sustained near-limit load destroys weak material ------
+    // Above creepStart, damage += mat.creepRate · (load−creepStart)/(1−creepStart) · dt
+    // ALWAYS — it stacks with the >1.0 overload bands rather than replacing
+    // them. 0.7 is deliberately below render.stressWarn (0.8): by the time a
+    // member is drawn as stressed it is already being consumed, so a dam that
+    // merely "holds" at 0.95 is living on borrowed time. Per-material rates
+    // live in materials.js (timber ~30 s at a sustained 0.85, steel 20×
+    // slower); at load 1.0 the factor is exactly 1, so creepRate reads as
+    // damage per second at the limit.
+    creepStart: 0.7,
   },
 
   build: {
@@ -304,6 +348,38 @@ export const CONFIG = {
     bowMax: 0.16,                       // m sagitta at load 1.0 (compression)
     cableSlackMin: 0.01,                // m of slack before a cable visibly hangs
     cableSagScale: 0.35,                // fraction of the geometric slack drawn as sag
+
+    // ---- DAMAGE v2.1 FEEDBACK: BENDING + CREEP (renderer.js) -------------
+    // Bending is a DIFFERENT failure from axial compression and must not look
+    // like it: the member bows LATERALLY, pushed along the water force
+    // (m.waterFx/waterFy), not to a hash-picked side. When bendLoad governs,
+    // this bow replaces the axial one — two bows on one member fight and read
+    // as noise. bendBowFrom deliberately matches stressFrom so the handover
+    // happens exactly where the axial bow would otherwise have started.
+    bendBowFrom: 0.35,                  // bendLoad where the lateral bow appears
+    bendBowMax: 0.30,                   // m sagitta at bendLoad 1.0, reference span
+    bendBowCap: 1.5,                    // bendLoad clamp (past the limit it is breaking,
+                                        // not bending further)
+    bendBowRefLen: 4,                   // m span that earns the full bendBowMax
+    bendBowLenMax: 1.6,                 // × cap on that length scaling
+    bendBowLenFrac: 0.16,               // hard cap: sagitta ≤ this × member length,
+                                        // so a short member never draws as a banana
+    bendCrackSpread: 0.26,              // crack ticks span this fraction of the member,
+                                        // centred on midspan (where bending snaps it)
+
+    // A member whose damage is GROWING gets a slow amber halo — deliberately
+    // unlike the fast white >stressWarn flash, because "degrading right now"
+    // and "overloaded right now" are different warnings and the player must be
+    // able to tell them apart at a glance.
+    creepEps: 1e-5,                     // damage growth per frame that counts as creeping
+    creepHold: 0.6,                     // s of sim time the cue holds after the last growth
+                                        // (so it does not strobe on quantised deltas)
+    creepPulseHz: 0.55,                 // slow, vs flashHz = 5
+    creepPulseAlpha: 0.45,
+    creepPulsePx: 4.2,                  // device px the halo extends past the member
+                                        // at the top of its breath (it pulses in
+                                        // width as well as alpha)
+    creepPulseColor: '#ffb347',
     brokenColor: '#3b4147',
     debrisAlpha: 0.9,
     nodeColor: '#e8f2fa',

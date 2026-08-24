@@ -44,6 +44,7 @@ function beginFrame(ctx, cam) {
 export function init() {
   skyGrad = null; hazeGrad = null; soilGrad = null;
   hillId = null; terrainId = null;
+  resetCreep();
 }
 
 // ---- small deterministic helpers -----------------------------------------
@@ -262,8 +263,12 @@ export function renderStressOverlay(ctx, cam, S, wetTest) {
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
     if (m.broken || !m.mat) continue;
-    const stressed = m.load > R.stressWarn;
     const wet = wetTest ? isWetMember(wetTest, m) : (w ? isSubmerged(w, m) : false);
+    // A creeping member can be sitting at 0.75 — under the flash threshold, but
+    // actively dying, and if it is underwater the reservoir would hide the one
+    // cue that says so. Only when WET: a dry one is already fully drawn in the
+    // base pass, with its material detail, and this pass would flatten it.
+    const stressed = m.load > R.stressWarn || (wet && isCreeping(m, t));
     if (!stressed && !wet) continue;      // dry and calm: the base pass has it
     if (stressed) drawMember(ctx, m, t, false);
     else drawWetMember(ctx, m);
@@ -725,18 +730,108 @@ function offsetStroke(ctx, ax, ay, bx, by, sag, off, color, width, alpha) {
   ctx.globalAlpha = 1;
 }
 
+// ---- damage v2.1: bending + creep ---------------------------------------
+//
+// Contract fields (ARCHITECTURE §5): m.bendLoad, m.waterFx/waterFy,
+// m.waterFperp. Every read here is guarded, because until stress.js lands they
+// are all undefined — and with them undefined this file must draw EXACTLY what
+// it drew before (no bow, no midspan clustering, no pulse).
+
+// Bending is the mechanism that will break this member: bendLoad IS m.load.
+function bendGoverns(m) {
+  const bl = m.bendLoad;
+  return bl > 0 && bl >= (m.load || 0) - 1e-6;
+}
+
+// Lateral bending bow, in SCREEN px, sign matching memberPath's sagitta.
+//
+// A long sealing member does not get crushed end-to-end — it gets pushed OUT OF
+// LINE by the water standing behind it, and snaps in the middle. So the bow
+// direction is taken from the water force itself (whose sign says which side the
+// water is on) and the member visibly leans DOWNSTREAM. That is the whole tell:
+// an axial buckle picks a hash-chosen side and means "shorten me", a bending bow
+// always points away from the reservoir and means "brace my face".
+function bendBow(m) {
+  const bl = m.bendLoad;
+  if (!(bl > R.bendBowFrom)) return 0;              // undefined, 0, or below cue
+  const wfx = m.waterFx, wfy = m.waterFy;
+  if (!isFinite(wfx) || !isFinite(wfy)) return 0;   // no side information: no bow
+  const dx = m.b.x - m.a.x, dy = m.b.y - m.a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-4) return 0;
+  const ux = dx / len, uy = dy / len;
+  // memberPath's positive sagitta direction, written in WORLD axes: it builds
+  // the screen perpendicular then flips it screen-downwards, which comes out as
+  // (uy, −ux) for a left-to-right member and (−uy, ux) for a right-to-left one.
+  const s = ux < 0 ? -1 : 1;
+  const perp = (wfx * uy - wfy * ux) * s;
+  if (perp === 0) return 0;
+  // Longer spans bow more for the same utilisation (sagitta ~ w·L⁴/EI against a
+  // capacity ~ 1/L², so the *look* has to grow with length or every member
+  // bends by the same 3 px and length stops reading).
+  const lenF = Math.min(R.bendBowLenMax, len / R.bendBowRefLen);
+  let sag = R.bendBowMax * Math.min(R.bendBowCap, bl) * lenF;
+  const cap = len * R.bendBowLenFrac;               // never a banana
+  if (sag > cap) sag = cap;
+  return sag * zoom * (perp > 0 ? 1 : -1);
+}
+
 // Sagitta in SCREEN px, applied perpendicular to the member by memberPath.
 // A slack cable hangs (positive = downwards); a compressed beam buckles to one
-// deterministic side, so it never flickers between sides frame to frame.
+// deterministic side, so it never flickers between sides frame to frame; a
+// member bent by water pressure leans downstream, and that bow WINS — two bows
+// on one member fight each other and read as noise.
 function bowFor(m) {
   if (m.mat && m.mat.tensionOnly) {
     const len = Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y);
     if (m.restLength - len <= R.cableSlackMin) return 0;
     return Math.sqrt(Math.max(0, m.restLength * m.restLength - len * len)) * R.cableSagScale * zoom;
   }
-  if (m.loadSign > 0 || m.load < R.stressFrom) return 0;
+  const bend = bendBow(m);
+  if (bend !== 0) return bend;
+  // m.load is max(axial, bending) in v2.1, so a bending-governed member must not
+  // be allowed to inflate the AXIAL bow with a number that is not axial.
+  // (bendLoad undefined ⇒ comparison false ⇒ exactly the v1 behaviour.)
+  const axial = m.bendLoad >= m.load ? 0 : m.load;
+  if (m.loadSign > 0 || axial < R.stressFrom) return 0;
   const dir = frac(hashStr(m.id), 3) < 0.5 ? -1 : 1;
-  return R.bowMax * Math.min(1.2, m.load) * zoom * dir;
+  return R.bowMax * Math.min(1.2, axial) * zoom * dir;
+}
+
+// ---- creep tracking -----------------------------------------------------
+//
+// "This member is degrading RIGHT NOW" is not readable from one frame: damage is
+// a level, not a rate. So sample it once per frame and remember who grew, for
+// creepHold seconds of sim time (quantised deltas would otherwise strobe).
+//
+// This has to be its OWN pass rather than a side effect of drawMember, because
+// drawMember runs twice a frame for a stressed member (base pass, then
+// renderStressOverlay over the water) and the second call would compare the
+// damage against its own sample and conclude that nothing is happening.
+const creepD = new Map();       // member id -> damage as of the last sample
+const creepUntil = new Map();   // member id -> sim time the cue expires
+let creepT = -1;
+
+function resetCreep() { creepD.clear(); creepUntil.clear(); creepT = -1; }
+
+function sampleCreep(structure, time) {
+  if (time === creepT) return;                          // already sampled
+  if (time < creepT) resetCreep();                      // retry rewound the clock
+  const ms = structure.members;
+  if (creepD.size > ms.length * 4 + 64) resetCreep();   // ids churned (level change)
+  creepT = time;
+  for (let i = 0; i < ms.length; i++) {
+    const m = ms[i];
+    const d = m.damage > 0 ? m.damage : 0;
+    const prev = creepD.get(m.id);
+    creepD.set(m.id, d);
+    if (prev !== undefined && d > prev + R.creepEps) creepUntil.set(m.id, time + R.creepHold);
+  }
+}
+
+function isCreeping(m, time) {
+  const until = creepUntil.get(m.id);
+  return until !== undefined && until >= time;
 }
 
 function drawMember(ctx, m, time, withDetail) {
@@ -754,6 +849,28 @@ function drawMember(ctx, m, time, withDetail) {
   const color = m.loadSign > 0 ? pal.t[step] : pal.c[step];
 
   ctx.lineCap = 'butt';
+
+  // ---- creep: a SLOW amber halo under the member ------------------------
+  // Deliberately unlike the fast white flash below: "this is being eaten right
+  // now, and it will go even if the load never rises" is a different warning
+  // from "this is overloaded right now", and the two must be tellable apart
+  // without reading a number. Phase is hashed per member off the SIM clock, so
+  // a wall of creeping timber shimmers instead of blinking in lockstep — and a
+  // replay of the same run looks identical.
+  if (isCreeping(m, time)) {
+    const p = 0.5 + 0.5 * Math.sin(time * R.creepPulseHz * TAU + frac(hashStr(m.id), 11) * TAU);
+    memberPath(ctx, ax, ay, bx, by, sag);
+    ctx.globalAlpha = R.creepPulseAlpha * (0.3 + 0.7 * p);
+    ctx.strokeStyle = R.creepPulseColor;
+    // The halo BREATHES — width as well as alpha. On a thin member at desktop
+    // dpr an alpha-only pulse is a few faint pixels nobody catches out of the
+    // corner of an eye; a moving edge is seen without being looked at.
+    ctx.lineWidth = width + R.creepPulsePx * dpr * 2 * (0.55 + 0.45 * p);
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'butt';
+  }
 
   if (detail) {                                   // dark outline for crispness
     memberPath(ctx, ax, ay, bx, by, sag);
@@ -794,9 +911,15 @@ function drawMember(ctx, m, time, withDetail) {
 
 // Small perpendicular ticks whose count grows with accumulated damage: a
 // colour-blind-safe read of "this is about to go".
+//
+// WHERE they sit is information too. Axial damage is spread along the member, so
+// the ticks are spread. Bending damage is a moment that peaks at MIDSPAN — that
+// is where the member will actually part — so a bending-governed member gets its
+// ticks clustered in the middle, pointing at the break before it happens.
 function drawCracks(ctx, m, ax, ay, bx, by, width) {
   const count = Math.min(R.crackTicksMax, Math.ceil(m.damage * R.crackTicksMax));
   if (count <= 0) return;
+  const midspan = bendGoverns(m);
   const seed = hashStr(m.id);
   const x0 = SX(ax), y0 = SY(ay), x1 = SX(bx), y1 = SY(by);
   const dx = x1 - x0, dy = y1 - y0;
@@ -805,7 +928,8 @@ function drawCracks(ctx, m, ax, ay, bx, by, width) {
   const tick = Math.max(R.crackLenPx * dpr, width * 0.8);
   ctx.beginPath();
   for (let i = 0; i < count; i++) {
-    const t = 0.15 + 0.7 * frac(seed, i * 13 + 1);
+    const f = frac(seed, i * 13 + 1);
+    const t = midspan ? 0.5 + (f - 0.5) * R.bendCrackSpread : 0.15 + 0.7 * f;
     const mx = x0 + dx * t, my = y0 + dy * t;
     const l = tick * (0.55 + 0.45 * frac(seed, i * 29 + 5));
     ctx.moveTo(mx - nx * l * 0.5, my - ny * l * 0.5);
@@ -820,6 +944,8 @@ function drawStructure(ctx, structure, time) {
   const members = structure.members;
   const B = getBuilder();
   const sel = B ? B.selection : null;
+
+  sampleCreep(structure, time);     // once per frame, before anything draws
 
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
