@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.3.0'; // mobile UX overhaul + box-delete section tool
+const VERSION = 'v2.3.1'; // new logo: flood wave breaking over a small timber dam
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
