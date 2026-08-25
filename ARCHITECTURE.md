@@ -51,6 +51,7 @@ FABLE (do not edit without Fable):
   src/main.js  src/config.js
   src/core/game.js  src/core/state.js  src/core/events.js
   src/core/terrain.js  src/core/camera.js  src/core/input.js
+  src/rendering/loupe.js  (touch placement magnifier)
 
 OPUS A — Physics & Simulation:
   src/physics/structures.js   (nodes/members/debris data + instantiate)
@@ -278,7 +279,7 @@ import { on, off, emit } from '../core/events.js';
 | `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` `ui:undo` `ui:redo` `ui:delete` `ui:clear` | | hud |
 | `ui:level`       | `{index}` (1-based campaign index)             | screens |
 | `design:change`  | `{action:'place'\|'delete', id}` (sounds/UI refresh) | builder |
-| `input:down/move/up` | `{x, y, px, py, id}` (world + pixel)       | input   |
+| `input:down/move/up` | `{x, y, px, py, id, button, cancel, ptype}` (ptype: 'touch'\|'mouse'\|'pen' — drives the touch loupe) | input   |
 | `input:pan` `{dx,dy}` px · `input:zoom` `{px,py,factor}` · `input:key` `{key}` | | input |
 
 Stats object (modes.js builds it; result screen shows it):

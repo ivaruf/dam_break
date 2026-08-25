@@ -26,6 +26,7 @@ import * as hud from '../ui/hud.js';
 import * as screens from '../ui/screens.js';
 import * as debug from '../ui/debug.js';
 import * as titleScene from '../ui/titleScene.js';
+import * as loupe from '../rendering/loupe.js';
 
 import { LEVELS } from '../levels/levels.js';
 import { loadLevelSpec } from '../levels/levelLoader.js';
@@ -71,6 +72,7 @@ export function boot(canvasEl) {
   hud.init();
   screens.init();
   debug.init();
+  loupe.init();
 
   wireEvents();
   setPhase('title');
@@ -263,6 +265,7 @@ function draw(dtReal) {
     waterRenderer.render(ctx, S.camera, S.water, S);
     effects.render(ctx, S.camera);
     debug.render(ctx, S.camera, S);
+    loupe.render(ctx, S);
   }
   hud.update(S);
 }

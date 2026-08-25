@@ -809,6 +809,21 @@ export const CONFIG = {
     },
   },
 
+  // touch loupe: the magnifier that keeps a finger from hiding the snap point
+  loupe: {
+    radiusPx: 52,          // circle radius (CSS px)
+    zoom: 2.2,             // magnification of the frame region
+    offsetPx: 88,          // finger -> loupe centre distance
+    topClearancePx: 96,    // don't collide with the HUD top row
+    ringPx: 3,
+    ringOk: '#7fff9a',
+    ringBad: '#ff5a3c',
+    ringNeutral: '#35a7ff',
+    cross: 'rgba(230, 245, 255, 0.9)',
+    crossPx: 10,
+    backing: 'rgba(6, 12, 18, 0.7)',
+  },
+
   levels: {
     tutorialKey: 'dam-builder-tut',     // localStorage flag for the level-1 tutorial
     tutorialLevel: 1,                   // campaign index that shows the tutorial

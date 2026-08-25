@@ -27,7 +27,7 @@ export function initInput(canvas, camera) {
   }
 
   canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
     const [px, py] = pos(e);
     pointers.set(e.pointerId, { px, py, button: e.button });
 
@@ -43,7 +43,7 @@ export function initInput(canvas, camera) {
         gesture = 'midpan';
       } else {
         gesture = 'single';
-        emit('input:down', { ...world(px, py), id: e.pointerId, button: e.button, cancel: false });
+        emit('input:down', { ...world(px, py), id: e.pointerId, button: e.button, cancel: false, ptype: e.pointerType || 'mouse' });
       }
     }
     e.preventDefault();
@@ -54,7 +54,7 @@ export function initInput(canvas, camera) {
     const [px, py] = pos(e);
 
     if (!rec) { // hover
-      emit('input:move', { ...world(px, py), id: e.pointerId, button: -1, cancel: false, hover: true });
+      emit('input:move', { ...world(px, py), id: e.pointerId, button: -1, cancel: false, hover: true, ptype: e.pointerType || 'mouse' });
       return;
     }
 
@@ -80,7 +80,7 @@ export function initInput(canvas, camera) {
 
     rec.px = px; rec.py = py;
     if (gesture === 'single') {
-      emit('input:move', { ...world(px, py), id: e.pointerId, button: rec.button, cancel: false, hover: false });
+      emit('input:move', { ...world(px, py), id: e.pointerId, button: rec.button, cancel: false, hover: false, ptype: e.pointerType || 'mouse' });
     }
   });
 
@@ -90,7 +90,7 @@ export function initInput(canvas, camera) {
     pointers.delete(e.pointerId);
     const [px, py] = pos(e);
     if (gesture === 'single') {
-      emit('input:up', { ...world(px, py), id: e.pointerId, button: rec.button, cancel });
+      emit('input:up', { ...world(px, py), id: e.pointerId, button: rec.button, cancel, ptype: e.pointerType || 'mouse' });
     }
     gesture = pointers.size >= 2 ? 'pinch' : pointers.size === 1 ? gesture : null;
     if (pointers.size === 0) gesture = null;

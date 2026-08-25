@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.3.1'; // new logo: flood wave breaking over a small timber dam
+const VERSION = 'v2.3.2'; // touch loupe: magnifier beside the finger while placing beams
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
@@ -33,6 +33,7 @@ const ASSETS = [
   './src/rendering/renderer.js',
   './src/rendering/waterRenderer.js',
   './src/rendering/effects.js',
+  './src/rendering/loupe.js',
   './src/ui/hud.js',
   './src/ui/titleScene.js',
   './src/ui/screens.js',
