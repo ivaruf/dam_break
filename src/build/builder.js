@@ -1,11 +1,11 @@
 // OPUS B owns. Design editing: place/connect/delete/select/ghost/undo.
 // Contract: ARCHITECTURE.md §10. Mutates the design object owned by game.js.
 //
-// Pointer model (nothing core depends on hover):
+// MOUSE / PEN — unchanged since v1 (nothing core depends on hover):
 //   press + drag  → ghost member from the snapped start to the snapped end,
 //                   placed on release if valid
-//   press + tap    → select the member under the finger (or clear the selection)
-//   right button   → delete the member under the cursor (mouse only)
+//   press + tap    → select the member under the pointer (or clear the selection)
+//   right button   → delete the member under the cursor
 //   erase tool     → press/drag deletes every member the path touches
 //   boxdelete tool → press/drag draws a marquee; release deletes the whole
 //                    SECTION inside it as one undo step (a tap falls back to the
@@ -13,22 +13,36 @@
 // After a placement the far endpoint becomes the "chain node": its snap radius
 // grows (CONFIG.build.chainSnapMul) so a quick follow-up drag continues the run.
 //
-// TOUCH AIMING v2 (build tool + `ptype:'touch'` only — see CONFIG.touch).
-// A mouse hovers before it commits and a cursor hides nothing. A finger does
-// neither: its first contact blindly commits the beam START, and it lands on
-// exactly the spot the player is trying to see. So for a touch build gesture:
-//   • OFFSET CURSOR — the active point floats CONFIG.touch.cursorOffsetPx above
-//     the fingertip and ALL snapping/ghost geometry uses the cursor, never the
-//     fingertip. Near the top edge the offset shrinks smoothly (never jumps).
-//   • DEFERRED START — pointer-down does not lock anything. The gesture opens
-//     in state 'aiming' with a PROVISIONAL start that re-snaps to the cursor as
-//     the finger slides (the player fine-positions while watching the loupe).
-//     Once the cursor has travelled CONFIG.touch.startCommitPx and the ghost
-//     would have a direction, the start locks where it was last snapped and the
-//     normal drag-to-draw takes over. A release while still aiming is a TAP, at
-//     the RAW fingertip (a fat contact patch is an asset for tapping).
-// Mouse and pen keep the original path exactly: no ptype means mouse.
-// The render layer reads B.touchAim (world + screen cursor, snap kind, aiming).
+// TOUCH + BUILD TOOL — PRESS-ADJUST-LIFT (v3; CONFIG.touch). v2.4's offset
+// cursor and deferred start are GONE: they moved the target away from the finger
+// and changed the gesture's mind mid-press, and playtest called that clonky. The
+// rule now has no states and no exceptions:
+//
+//   EVERY press previews at the SNAPPED FINGERTIP. Sliding re-snaps the
+//   preview. THE LIFT COMMITS. Nothing else, ever, changes the design.
+//
+// What the preview IS depends only on what already exists:
+//   • CHAIN HEAD live → a BEAM from the head to the snapped fingertip. The lift
+//     places beam + node and the new endpoint becomes the head, so a run is
+//     tap-tap-tap. A tap ON the head finishes the run.
+//   • no head, press on a node/anchor → a beam FROM it (classic drag-draw falls
+//     out of this for free, and a tap adopts the joint as the head instead).
+//   • no head, press on open ground → just the snapped NODE marker; the lift
+//     claims that point as a PENDING head. Pending means "not a design node
+//     yet": an unconnected node is an orphan and the design never holds one.
+// Snapping to nodes and anchors is CONFIG.touch.snapMul stronger for touch (the
+// grid stays 0.5 m), so the preview pops between candidates instead of drifting.
+// The loupe (rendering/loupe.js) shows the fingertip magnified — it, not an
+// offset, is the answer to a finger covering its own target.
+// A press+lift with the build tool NEVER selects: erase and box-delete are the
+// touch deletion tools, and every build press is a placement.
+//
+// NODE DRAGGING (mouse AND touch, build tool): press-and-HOLD on an existing
+// design node (CONFIG.touch.holdMs, travel under holdSlopPx) lifts it. It
+// follows the snapped pointer with every attached member recomputed live, and
+// the release either commits the move as ONE undo step or reverts it whole.
+//
+// The render layer reads B.chainHead and B.nodeDrag (see the state block).
 
 import { CONFIG } from '../config.js';
 import { on, emit } from '../core/events.js';
@@ -47,21 +61,33 @@ const B = {
   selection: null,        // member id | null  (renderer highlights it)
   hover: null,            // {x,y, snap} last hover/drag point — cosmetic only
   hoverMember: null,      // member id under the pointer — cosmetic only
-  touchAim: null,         // touch build gesture only, for the render layer:
-                          // {x, y, px, py, kind, aiming} — the offset AIM
-                          // CURSOR in world metres AND device px, the snap kind
-                          // under it ('node'|'anchor'|'grid'), and whether the
-                          // start is still provisional. null for mouse/pen, for
-                          // the erase/boxdelete tools, and between gestures.
   nextId: 1,
   undo: [],
   redo: [],
-  chainNodeId: null,      // endpoint of the member just placed
+  chainNodeId: null,      // endpoint of the member just placed (snap radius bonus)
+  chainHead: null,        // TOUCH CHAIN (v3), for the render layer + the HUD:
+                          //   null | {x, y, nodeId|null, anchorId|null, kind,
+                          //           pending}
+                          // the joint the next touch press builds FROM, drawn
+                          // pulsing. `pending` means the point is claimed but is
+                          // not a design node yet (a lone node would be an
+                          // orphan). Set by a committed touch lift, cleared by a
+                          // tap on itself, a tool switch, a phase change,
+                          // undo/redo/clear, or the node under it disappearing.
+                          // Mouse and pen never set it, so a mouse-only session
+                          // never sees one.
+  nodeDrag: null,         // LIFTED NODE (mouse or touch), for the render layer:
+                          //   null | {nodeId, x, y, anchorId, ok, reason,
+                          //           touch, orig:{x,y,anchorId}, members:[id]}
+                          // The design node itself is moved LIVE (so every
+                          // attached member follows for free); `orig` is what a
+                          // revert or the single undo step restores.
   hint: null,             // {text, until} last refusal reason, for the HUD
 };
 
 export function getBuilder() { return B; }
 export function getSelection() { return B.selection; }
+export function getChainHead() { return B.chainHead; }
 export function canUndo() { return B.undo.length > 0; }
 export function canRedo() { return B.redo.length > 0; }
 
@@ -90,7 +116,9 @@ export function initBuilder() {
   on('ui:delete', () => deleteSelection());
   on('ui:clear', () => clearDesign());
   on('input:key', onKey);
-  on('phase:change', ({ phase }) => { if (phase !== 'build') cancelDrag(); });
+  // Leaving the build phase ends everything in flight, the chain included: a
+  // pulsing head over a running simulation would be a promise nothing can keep.
+  on('phase:change', ({ phase }) => { if (phase !== 'build') { cancelDrag(); B.chainHead = null; } });
 }
 
 export function startLevel(level, terrain, design) {
@@ -99,10 +127,12 @@ export function startLevel(level, terrain, design) {
   B.tool = 'build';
   B.ghost = null; B.drag = null; B.selection = null;
   B.marquee = null; B.marqueeHits = [];
-  B.hover = null; B.hoverMember = null; B.touchAim = null;
+  B.hover = null; B.hoverMember = null;
   B.nextId = 1;
   B.undo = []; B.redo = [];
   B.chainNodeId = null;
+  B.chainHead = null;
+  B.nodeDrag = null;
   B.hint = null;
 }
 
@@ -166,11 +196,31 @@ export function setMaterial(id) {
   B.tool = 'build';            // picking a material always means "build"
   dropMarquee();
   if (B.drag && B.drag.mode === 'build' && B.drag.moved && B.drag.last) updateGhost(B.drag.last);
+  // a live touch preview re-costs itself in the new material immediately
+  else if (B.drag && B.drag.mode === 'touchbuild' && B.drag.last) updatePreview(B.drag.last);
 }
 
 // toggle=true (a UI button) re-sending the active non-build tool turns it off.
 export function setTool(id, toggle) {
   const next = (toggle && id !== 'build' && B.tool === id) ? 'build' : id;
+  // Switching tools ENDS a touch chain: the head is a promise about what the
+  // next press will build, and reaching for the eraser withdraws it. Picking a
+  // material does not (that sets B.tool directly, and is still building).
+  //
+  // Pressing the BUILD button itself ends one too, even though the tool does not
+  // change: it is the toolbar's "never mind" — and it is the escape hatch for a
+  // chain whose head has been left somewhere the player can no longer reach
+  // (scrolled off screen, or too far for any legal beam). `toggle` is only true
+  // for a real UI press, so the internal setTool('build') calls do not.
+  if (toggle && next === 'build') B.chainHead = null;
+  if (next !== B.tool) {
+    B.chainHead = null;
+    // A node in the air and a live touch preview both belong to the BUILD tool,
+    // so a tool change abandons them (the node goes back where it was). The
+    // mouse's own build drag is deliberately left alone: it commits on its own
+    // release exactly as it always has.
+    if (B.nodeDrag || (B.drag && B.drag.mode === 'touchbuild')) cancelDrag();
+  }
   B.tool = next;
   if (next !== 'build') B.ghost = null;
   if (next !== 'boxdelete') dropMarquee();   // disarming mid-drag deletes nothing
@@ -216,31 +266,41 @@ function pushUndo() {
   B.redo.length = 0;
 }
 
+// History wins over anything in flight. A live node lift is put BACK before the
+// snapshot is taken (otherwise redo would remember a position the player never
+// committed), and the touch chain is dropped: the design it pointed into has
+// just changed under it.
 export function undo() {
   if (!B.design || !B.undo.length) return false;
+  abortNodeDrag();
   B.redo.push(snapshot());
   if (B.redo.length > CONFIG.build.undoDepth) B.redo.shift();
   restore(B.undo.pop());
   cancelDrag();
+  B.chainHead = null;
   return true;
 }
 
 export function redo() {
   if (!B.design || !B.redo.length) return false;
+  abortNodeDrag();
   B.undo.push(snapshot());
   if (B.undo.length > CONFIG.build.undoDepth) B.undo.shift();
   restore(B.redo.pop());
   cancelDrag();
+  B.chainHead = null;
   return true;
 }
 
 export function clearDesign() {
   if (!B.design || (!B.design.members.length && !B.design.nodes.length)) return false;
+  abortNodeDrag();
   pushUndo();
   B.design.members.length = 0;
   B.design.nodes.length = 0;
   B.selection = null;
   B.chainNodeId = null;
+  B.chainHead = null;
   cancelDrag();
   return true;
 }
@@ -274,9 +334,17 @@ function cleanupOrphans() {
   // the in-flight ghost may name a node that just disappeared
   if (removed) B.ghost = null;
   if (B.chainNodeId && !nodes.some((n) => n.id === B.chainNodeId)) B.chainNodeId = null;
+  // a chain head or a lifted node whose node is gone is a dangling promise
+  if (B.chainHead && B.chainHead.nodeId && !nodes.some((n) => n.id === B.chainHead.nodeId)) {
+    B.chainHead = null;
+  }
+  if (B.nodeDrag && !nodes.some((n) => n.id === B.nodeDrag.nodeId)) B.nodeDrag = null;
 }
 
-function placeMember(start, end) {
+// `touch` = this placement came from a touch lift, so the far endpoint becomes
+// the CHAIN HEAD and the next press continues the run. Mouse/pen placements
+// leave the chain alone, which in a mouse-only session means there never is one.
+function placeMember(start, end, touch) {
   const mat = MATERIALS[B.material];
   const v = validate(start, end, mat, B.design, B.terrain, B.level, budgetLeft());
   if (!v.ok) { hint(v.reason); return null; }
@@ -289,6 +357,7 @@ function placeMember(start, end) {
   const m = { id: 'm' + B.nextId++, a, b, mat: B.material };
   B.design.members.push(m);
   B.chainNodeId = b;
+  if (touch) B.chainHead = headAt(nodeById(b));
   B.selection = null;
   emit('design:change', { action: 'place', id: m.id });
   return m;
@@ -345,94 +414,72 @@ function tolerance(mul) {
 }
 
 function cancelDrag() {
-  const wasDrag = B.drag;
+  const wasDrag = B.drag || B.nodeDrag;
+  abortNodeDrag();           // an interrupted lift never commits
   B.drag = null;
   B.ghost = null;
-  B.touchAim = null;
   clearMarquee();
   if (wasDrag && B.design) cleanupOrphans();
 }
 
-// ---- touch aim cursor -----------------------------------------------------
-//
-// Device pixels per CSS pixel. CONFIG.touch is specified in CSS px (it is a
-// THUMB measurement, so it must mean the same thing on every screen) while
-// input:* events carry device px. The builder has no canvas handle — camera.js
-// closes over the element without exposing it — so read the live canvas the
-// same way main.js and loupe.js do. No DOM (headless tests) means 1, which is
-// exactly right: those drive device px directly.
-let dprCanvas = null;
-
+// Device pixels per CSS pixel. CONFIG.touch is specified in CSS px (thumbs and
+// hold-slop are body measurements, so they must mean the same thing on every
+// screen) while input:* events carry device px. camera.js exposes the canvas it
+// closed over, so there is no DOM lookup here; a headless camera stub has none,
+// which correctly gives 1 — those tests drive device px directly.
 function dpr() {
-  if (typeof document === 'undefined') return 1;
-  if (!dprCanvas || dprCanvas.isConnected === false) {
-    dprCanvas = (typeof document.getElementById === 'function' && document.getElementById('game'))
-      || (typeof document.querySelector === 'function' && document.querySelector('canvas'))
-      || null;
-  }
-  const c = dprCanvas;
+  const cam = getScene().camera;
+  const c = cam && cam.canvas;
   if (!c || !c.width || !c.clientWidth) return 1;
   const d = c.width / c.clientWidth;
   return d > 0.1 && d < 8 ? d : 1;
 }
 
-// The offset aim cursor for a touch gesture: {px, py} device px + {x, y} world.
-// Returns null when the camera cannot unproject (a headless stub without
-// screenToWorld) — the caller then keeps the plain fingertip behaviour, so a
-// missing camera degrades to the mouse path rather than throwing.
-function cursorAt(p) {
-  const cam = getScene().camera;
-  if (!cam || typeof cam.screenToWorld !== 'function') return null;
-  const T = CONFIG.touch;
-  const d = dpr();
-  // The offset SHRINKS towards the top edge instead of being clamped there:
-  // min() is continuous, so the cursor slides into the fingertip as the finger
-  // approaches the HUD and never jumps mid-gesture. Floored at 0 — the cursor
-  // is never BELOW the finger, and never above the clearance line unless the
-  // finger already is.
-  const off = Math.max(0, Math.min(T.cursorOffsetPx * d, p.py - T.topClearancePx * d));
-  const px = p.px, py = p.py - off;
-  const [x, y] = cam.screenToWorld(px, py);
-  return { px, py, x, y };
-}
+// ---- snapping helpers -----------------------------------------------------
 
-// Fallback "cursor" that is just the fingertip (see cursorAt).
-function fingerAt(p) { return { px: p.px, py: p.py, x: p.x, y: p.y }; }
-
-function setTouchAim(cur, kind, aiming) {
-  B.touchAim = { x: cur.x, y: cur.y, px: cur.px, py: cur.py, kind, aiming };
-}
-
-// Cursor travel that locks the start, in DEVICE px.
+// Snap for a TOUCH gesture: same priority as always, node and anchor radii
+// scaled by CONFIG.touch.snapMul so the preview endpoint pops onto joints.
 //
-// startCommitPx is a screen distance, and it has to be: it is the difference
-// between a thumb settling and a thumb pulling. But a screen distance is a
-// world distance too, and on a zoomed-out portrait phone (level 2 fits its
-// valley at ~7 px/m) 26 px is 3.7 m — more than concrete is ALLOWED to span,
-// which would make concrete unplaceable by touch at the default framing. So the
-// threshold is capped at commitMaxFrac of the material's longest legal beam:
-// the gesture can always reach a beam this material is permitted to be. At any
-// zoom where fine work is actually possible the cap is inert.
-function commitPx() {
-  const T = CONFIG.touch;
-  const base = T.startCommitPx * dpr();
-  const cam = getScene().camera;
-  const mat = MATERIALS[B.material];
-  const zoom = cam ? cam.zoom : 0;
-  if (!mat || !mat.maxLength || !(zoom > 0)) return base;
-  return Math.min(base, mat.maxLength * zoom * T.commitMaxFrac);
+// Deliberately NO chain bonus (CONFIG.build.chainSnapMul). That bonus exists so
+// a MOUSE can start a follow-up drag near the endpoint it just placed; a touch
+// chain already builds from the head by definition, and stacking 1.7 on top of
+// snapMul would give the head a 2 m radius — swallowing every tap that meant
+// "beam to here" and reading it as "tap the head, finish the run" instead. The
+// head keeps the plain node radius, which is also the honest rule: within a
+// node's snap radius, a tap means THAT node.
+function snapTouch(x, y) {
+  return snapPoint(x, y, B.design, B.terrain, { radiusMul: CONFIG.touch.snapMul });
 }
 
-// "Meaningfully directional": the snapped end resolves to a different point
-// than the provisional start. Both are quantised (node / anchor / 0.5 m grid),
-// so this is the earliest moment a locked start can produce a beam that HAS a
-// direction — commit before it and the gesture's first ghost is a zero-length
-// stub sitting under the cursor.
-function directional(a, b) {
+// Two snapped points that mean the same place. Both are quantised (node /
+// anchor / 0.5 m grid), so this is exact rather than fuzzy: it answers "would
+// the beam between these two be a zero-length stub?".
+function samePoint(a, b) {
   if (!a || !b) return false;
-  if (a.nodeId && a.nodeId === b.nodeId) return false;
-  return Math.hypot(b.x - a.x, b.y - a.y) > CONFIG.build.mergeEps;
+  if (a.nodeId && b.nodeId) return a.nodeId === b.nodeId;
+  return Math.hypot(b.x - a.x, b.y - a.y) <= CONFIG.build.mergeEps;
 }
+
+function nodeById(id) {
+  if (!id || !B.design) return null;
+  for (const n of B.design.nodes) if (n.id === id) return n;
+  return null;
+}
+
+// A chain-head record from any snapped point or design node.
+function headAt(pt) {
+  if (!pt) return null;
+  const nodeId = pt.id || pt.nodeId || null;
+  return {
+    x: pt.x, y: pt.y,
+    nodeId,
+    anchorId: pt.anchorId || null,
+    kind: nodeId ? 'node' : pt.anchorId ? 'anchor' : (pt.kind || 'grid'),
+    pending: !nodeId,
+  };
+}
+
+// ---- pointer down ---------------------------------------------------------
 
 function onDown(p) {
   const S = scene();
@@ -450,17 +497,14 @@ function onDown(p) {
   const eraser = B.tool === 'erase';
   const box = B.tool === 'boxdelete';
 
-  // TOOL CHOICE (touch aiming v2): only the BUILD tool gets the offset cursor.
-  // Erase and box-delete are coarse by nature — a sweep through members and a
-  // marquee round a section — and both are aimed with the WHOLE contact patch,
-  // not a point. Offsetting them would move the deletion 56 px away from the
-  // thing the player is pointing at, which is the one place a surprise is
-  // unforgivable. So those two stay on the raw fingertip, exactly as before.
-  const touch = p.ptype === 'touch' && !eraser && !box;
-  const cur = touch ? cursorAt(p) : null;
-  const from = cur || fingerAt(p);
+  // TOOL CHOICE: only the BUILD tool gets press-adjust-lift. Erase and
+  // box-delete are coarse by nature — a sweep through members, a marquee round a
+  // section — and both are aimed with the whole contact patch, so they keep the
+  // raw fingertip and the original code path, mouse and touch alike.
+  if (p.ptype === 'touch' && !eraser && !box) { touchDown(p); return; }
+
   const start = (eraser || box) ? null
-    : snapPoint(from.x, from.y, B.design, B.terrain, { chainNodeId: B.chainNodeId });
+    : snapPoint(p.x, p.y, B.design, B.terrain, { chainNodeId: B.chainNodeId });
 
   B.drag = {
     mode: box ? 'boxdelete' : eraser ? 'erase' : 'build',
@@ -471,29 +515,54 @@ function onDown(p) {
     last: start,
     snapped: false,
     moved: false,
-    // touch aiming (build tool only; false/unused for mouse, pen and the
-    // delete tools, which therefore run the original code path untouched)
-    touch: !!cur,
-    aiming: !!cur,           // the start above is PROVISIONAL until it locks
-    cpx0: from.px, cpy0: from.py,   // cursor origin for the commit test
+    touch: false,
+    // press-and-hold on an existing node lifts it (see holdCheck)
+    holdNodeId: (!eraser && !box && start && start.kind === 'node') ? start.nodeId : null,
   };
   B.ghost = null;
-  B.touchAim = null;
-  if (cur) {
-    setTouchAim(cur, start.kind, true);
-    // publish the provisional snap immediately: the renderer's snap mark is
-    // what answers "where am I?" on the very first contact of a gesture, which
-    // is the whole complaint touch aiming v2 exists to fix
-    B.hover = { x: cur.x, y: cur.y, snap: start };
-  }
   clearMarquee();            // the box only exists once the drag passes dragMinPx
 
   if (eraser) eraseAt(p.x, p.y);
 }
 
+// A touch press with the build tool. Nothing is committed and nothing is locked:
+// this only decides what the PREVIEW is, and the preview follows the finger
+// until it lifts.
+function touchDown(p) {
+  const snap = snapTouch(p.x, p.y);
+  const head = B.chainHead;
+  // Where a beam would come FROM: the chain head if a run is live, else the
+  // joint under the finger, else nothing (an open-ground press previews a node).
+  const from = head || ((snap.kind === 'node' || snap.kind === 'anchor') ? snap : null);
+
+  B.drag = {
+    mode: 'touchbuild',
+    touch: true,
+    start: from,             // named `start` so cleanupOrphans keeps protecting it
+    from,
+    px0: p.px, py0: p.py, t0: now(),
+    lx: p.x, ly: p.y,
+    x0: p.x, y0: p.y,
+    last: snap,
+    snapped: false,
+    moved: false,
+    holdNodeId: snap.kind === 'node' ? snap.nodeId : null,
+  };
+  B.ghost = null;
+  clearMarquee();
+  // Publish the snap immediately: on the very first contact the snap ring IS
+  // the answer to "where will this land?", and the loupe magnifies it.
+  B.hover = { x: p.x, y: p.y, snap };
+  updatePreview(snap);
+}
+
+// ---- pointer move ---------------------------------------------------------
+
 function onMove(p) {
   const S = getScene();
   if (S.phase !== 'build' || !B.design) return;
+
+  if (B.nodeDrag) { nodeDragMove(p); return; }    // a lifted node owns the pointer
 
   if (!B.drag) {                                  // hover (mouse only, cosmetic)
     if (p.hover) {
@@ -523,7 +592,13 @@ function onMove(p) {
     return;
   }
 
-  if (B.drag.touch) { touchMove(p); return; }      // offset cursor + deferred start
+  // A press that stayed put on an existing node long enough LIFTS it (mouse and
+  // touch alike). This is checked here rather than on a timer so the builder
+  // stays free of the frame clock: the promotion happens on the first move
+  // after the hold, which is also the first moment the node has anywhere to go.
+  if (B.drag.holdNodeId && holdCheck(travel)) { nodeDragMove(p); return; }
+
+  if (B.drag.mode === 'touchbuild') { touchMove(p); return; }
 
   if (!B.drag.moved) { B.ghost = null; return; }
   // no chain bonus on the far end: that radius exists to make STARTING a
@@ -534,62 +609,31 @@ function onMove(p) {
   updateGhost(end);
 }
 
-// A touch build gesture. Everything geometric here is measured at the CURSOR;
-// the fingertip only ever decides where the cursor is (and, on release while
-// aiming, what was tapped).
+// Sliding a touch press only ever re-snaps the preview: adjust, then lift.
 function touchMove(p) {
-  const d = B.drag;
-  const cur = cursorAt(p) || fingerAt(p);
+  const snap = snapTouch(p.x, p.y);
+  B.drag.last = snap;
+  B.hover = { x: p.x, y: p.y, snap };
+  updatePreview(snap);
+}
 
-  if (d.aiming) {
-    // Travel is the DISPLACEMENT from where the cursor started, not the path
-    // length: fine-positioning wanders, and a wiggle that comes back to where
-    // it began must still release as a tap.
-    const travel = Math.hypot(cur.px - d.cpx0, cur.py - d.cpy0);
-    if (travel >= commitPx()) {
-      // The pull has begun: the start LOCKS where it was last snapped — the
-      // point the player was aiming at, not the point they have now dragged to
-      // — and this move becomes the drag's end.
-      const end = snapPoint(cur.x, cur.y, B.design, B.terrain);
-      if (directional(d.start, end)) {
-        d.aiming = false;
-        d.moved = true;
-        d.last = end;
-        B.hover = { x: cur.x, y: cur.y, snap: end };
-        setTouchAim(cur, end.kind, false);
-        updateGhost(end);
-        return;
-      }
-      // not directional yet (still the same snap target): keep aiming
-    }
-    // still aiming: the provisional start follows the cursor, chain radius and
-    // all, so a run can be continued from the endpoint just placed
-    const s = snapPoint(cur.x, cur.y, B.design, B.terrain, { chainNodeId: B.chainNodeId });
-    d.start = s;
-    d.last = s;
-    d.moved = false;         // an aiming gesture has not "moved": no ghost yet,
-                             // and a material switch must not conjure one
-    B.ghost = null;
-    B.hover = { x: cur.x, y: cur.y, snap: s };
-    setTouchAim(cur, s.kind, true);
-    return;
-  }
-
-  // committed: the normal drag-to-draw, with the end snapped at the cursor and
-  // no chain bonus on it (same reason as the mouse path)
-  const end = snapPoint(cur.x, cur.y, B.design, B.terrain);
-  d.last = end;
-  B.hover = { x: cur.x, y: cur.y, snap: end };
-  setTouchAim(cur, end.kind, false);
+// The preview under a live touch press: a beam from the gesture's origin to the
+// snapped fingertip, or — with no origin, or while the beam would be a
+// zero-length stub — nothing but the snap mark the renderer draws from B.hover.
+function updatePreview(end) {
+  const from = B.drag && B.drag.from;
+  if (!from || samePoint(from, end)) { B.ghost = null; return; }
   updateGhost(end);
 }
+
+// ---- pointer up -----------------------------------------------------------
 
 function onUp(p) {
   const drag = B.drag;
   const ghost = B.ghost;
   B.drag = null;
   B.ghost = null;
-  B.touchAim = null;
+  if (B.nodeDrag) { finishNodeDrag(p); return; }
   if (!drag || drag.mode === 'dead' || !B.design) { clearMarquee(); if (drag) cleanupOrphans(); return; }
 
   if (drag.mode === 'erase') { cleanupOrphans(); return; }
@@ -608,30 +652,7 @@ function onUp(p) {
 
   if (p.cancel) { cleanupOrphans(); return; }     // pinch-cancel: never place
 
-  // A touch build gesture has already decided what it is, so it does not go
-  // through the mouse's tap/drag thresholds at all.
-  if (drag.touch) {
-    if (drag.aiming) {
-      // The start never locked, so nothing was ever going to be built: this is
-      // a TAP, judged at the RAW fingertip with the normal tolerance (a fat
-      // contact patch is an ASSET for hitting a beam). No tapMaxMs gate either
-      // — aiming is deliberate, and a slow, careful "no, nothing here" is
-      // still a tap.
-      B.selection = hitTestMember(p.x, p.y, B.design, tolerance());
-      cleanupOrphans();
-      return;
-    }
-    // Locked: the commit WAS the decision to draw a beam. The mouse needs
-    // tapMaxPx/dragMinPx because its press commits a start and it must still
-    // tell a click from a drag; here the lock has already done that, and at a
-    // far-out zoom commitPx is capped below tapMaxPx anyway — gating on it
-    // would silently throw away a beam the player watched themselves draw.
-    const at = cursorAt(p) || fingerAt(p);
-    const cEnd = (ghost && ghost.end) || snapPoint(at.x, at.y, B.design, B.terrain, { chainNodeId: B.chainNodeId });
-    placeMember(drag.start, cEnd);
-    cleanupOrphans();
-    return;
-  }
+  if (drag.mode === 'touchbuild') { touchCommit(p, drag); cleanupOrphans(); return; }
 
   const cfg = CONFIG.build;
   const travel = Math.hypot(p.px - drag.px0, p.py - drag.py0);
@@ -649,6 +670,29 @@ function onUp(p) {
   cleanupOrphans();
 }
 
+// THE commit point of touch building: the finger has left the glass, and where
+// it left is what gets built. Four outcomes, in this order:
+//   1. a TAP on the chain head finishes the run (this is the "done" gesture);
+//   2. a press that had no origin claims its lift point as a PENDING head;
+//   3. a beam that would be a stub either adopts its joint as the head (so a
+//      tap on existing work starts a run) or does nothing;
+//   4. otherwise: place the beam, and the far end becomes the head.
+// An invalid beam hints and places nothing — and leaves the chain exactly as it
+// was, so a refusal costs the player a tap, not their run.
+function touchCommit(p, drag) {
+  const end = snapTouch(p.x, p.y);
+  const tap = Math.hypot(p.px - drag.px0, p.py - drag.py0) <= CONFIG.touch.tapMaxPx * dpr();
+  const head = B.chainHead;
+
+  if (head && tap && samePoint(head, end)) { B.chainHead = null; return; }
+  if (!drag.from) { B.chainHead = headAt(end); return; }
+  if (samePoint(drag.from, end)) {
+    if (!head && tap) B.chainHead = headAt(drag.from);
+    return;
+  }
+  placeMember(drag.from, end, true);
+}
+
 function updateGhost(end) {
   const start = B.drag.start;
   const mat = MATERIALS[B.material];
@@ -664,6 +708,144 @@ function updateGhost(end) {
     startNodeId: start.nodeId || null,
     endNodeId: end.nodeId || null,
   };
+}
+
+// ---- node dragging (mouse + touch, build tool) ----------------------------
+//
+// The design nodes ARE the geometry, so a lifted node is moved in place and
+// every attached member follows it for free — including in the cost readout and
+// the renderer. That is also why the move has to be reversible to the metre:
+// `orig` is the position the release restores when the drop is illegal, and the
+// position the ONE undo step snapshots when it is legal.
+
+// True when the press has earned the lift. Called on every move of a press that
+// started on a node: past holdSlopPx before holdMs the gesture is a slide (draw
+// a beam), and the candidate is dropped for good.
+function holdCheck(travel) {
+  const d = B.drag;
+  const T = CONFIG.touch;
+  if (now() - d.t0 < T.holdMs) {
+    if (travel > T.holdSlopPx * dpr()) d.holdNodeId = null;
+    return false;
+  }
+  if (startNodeDrag(d.holdNodeId, !!d.touch)) return true;
+  d.holdNodeId = null;
+  return false;
+}
+
+function startNodeDrag(nodeId, touch) {
+  const n = nodeById(nodeId);
+  if (!n) return false;
+  const members = [];
+  for (const m of B.design.members) if (m.a === nodeId || m.b === nodeId) members.push(m.id);
+  if (!members.length) return false;          // nothing attached: nothing to move
+  B.nodeDrag = {
+    nodeId, touch: !!touch, members,
+    orig: { x: n.x, y: n.y, anchorId: n.anchorId || null },
+    x: n.x, y: n.y, anchorId: n.anchorId || null,
+    ok: true, reason: '',
+  };
+  B.ghost = null;
+  return true;
+}
+
+function nodeDragMove(p) {
+  const nd = B.nodeDrag;
+  const snap = snapPoint(p.x, p.y, B.design, B.terrain, {
+    radiusMul: nd.touch ? CONFIG.touch.snapMul : 1,
+    ignoreNodeId: nd.nodeId,
+    // anchors and the grid only: dropping this node exactly onto another one
+    // would leave a coincident pair, which is not a joint
+    noNodes: true,
+  });
+  const n = nodeById(nd.nodeId);
+  if (!n) { B.nodeDrag = null; return; }
+  n.x = snap.x; n.y = snap.y; n.anchorId = snap.anchorId || null;
+  nd.x = n.x; nd.y = n.y; nd.anchorId = n.anchorId; nd.snap = snap;
+  const v = validateNode(n);
+  nd.ok = v.ok; nd.reason = v.reason;
+  B.hover = { x: p.x, y: p.y, snap };
+}
+
+// Is the design legal with this node where it now is? What a move can break: a
+// beam grown past what its material may span (or shrunk under it), the budget
+// (grown lengths cost money, which is why the WHOLE design is re-costed), the
+// build zone, the ground, and the one thing snapping cannot prevent — landing
+// exactly on top of another joint. The node drag deliberately does not snap to
+// other nodes (a coincident pair is not a joint), so a drop that lands on one
+// anyway, by grid or by a shared anchor, is refused rather than silently made.
+function validateNode(n) {
+  const cfg = CONFIG.build;
+  if (B.level && B.level.buildZone) {
+    const z = B.level.buildZone;
+    if (n.x < z.x0 - 1e-6 || n.x > z.x1 + 1e-6) return { ok: false, reason: 'outside build zone' };
+  }
+  if (B.terrain && B.terrain.heightAt && n.y < B.terrain.heightAt(n.x) - cfg.groundTol) {
+    return { ok: false, reason: 'underground' };
+  }
+  for (const q of B.design.nodes) {
+    if (q.id === n.id) continue;
+    if (Math.hypot(q.x - n.x, q.y - n.y) <= cfg.mergeEps ||
+        (n.anchorId && q.anchorId === n.anchorId)) {
+      return { ok: false, reason: 'another joint there' };
+    }
+  }
+  for (const m of B.design.members) {
+    if (m.a !== n.id && m.b !== n.id) continue;
+    const other = nodeById(m.a === n.id ? m.b : m.a);
+    const mat = MATERIALS[m.mat];
+    if (!other || !mat) continue;
+    const len = Math.hypot(other.x - n.x, other.y - n.y);
+    if (len > mat.maxLength) return { ok: false, reason: 'too long' };
+    if (len < mat.minLength) return { ok: false, reason: 'too short' };
+  }
+  if (B.level && designCost(B.design) > B.level.budget + cfg.budgetEps) {
+    return { ok: false, reason: 'over budget' };
+  }
+  return { ok: true, reason: '' };
+}
+
+function finishNodeDrag(p) {
+  const nd = B.nodeDrag;
+  B.nodeDrag = null;
+  B.ghost = null;
+  const n = nodeById(nd.nodeId);
+  if (!n) return;
+
+  const to = { x: n.x, y: n.y, anchorId: n.anchorId || null };
+  const moved = to.x !== nd.orig.x || to.y !== nd.orig.y || to.anchorId !== nd.orig.anchorId;
+  putNodeBack(n, nd);                            // always: history is authored
+                                                 // from the pre-lift state
+  if ((p && p.cancel) || !nd.ok || !moved) {
+    if (!nd.ok && nd.reason) hint(nd.reason);    // a red drop says why
+    return;
+  }
+  pushUndo();
+  n.x = to.x; n.y = to.y; n.anchorId = to.anchorId;
+  syncChainHead(n);
+  emit('design:change', { action: 'move', id: nd.nodeId });
+}
+
+function putNodeBack(n, nd) {
+  n.x = nd.orig.x; n.y = nd.orig.y; n.anchorId = nd.orig.anchorId;
+  syncChainHead(n);
+}
+
+// Revert an in-flight lift without committing anything (tool switch, phase
+// change, undo, a key delete that took the member out from under it).
+function abortNodeDrag() {
+  const nd = B.nodeDrag;
+  if (!nd) return;
+  B.nodeDrag = null;
+  const n = nodeById(nd.nodeId);
+  if (n) putNodeBack(n, nd);
+}
+
+// The chain head is a COPY of a point, so a node that moves takes its head with
+// it (and a head naming a node that died is dropped in cleanupOrphans).
+function syncChainHead(n) {
+  const h = B.chainHead;
+  if (h && h.nodeId === n.id) { h.x = n.x; h.y = n.y; h.anchorId = n.anchorId || null; }
 }
 
 // ---- eraser ---------------------------------------------------------------

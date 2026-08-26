@@ -34,6 +34,19 @@ export function createCamera(canvas) {
       cam.y = wy + (py - canvas.height / 2) / cam.zoom;
     },
 
+    // Frame a world rect (e.g. the build zone) with margin — used by the
+    // zoom-to-build-zone button so touch players get grid cells bigger than
+    // their fingertip error.
+    fitZone(x0, y0, x1, y1, marginFrac = 0.18) {
+      const w = Math.max(2, x1 - x0);
+      const h = Math.max(2, y1 - y0);
+      cam.zoom = Math.min(cam.max, Math.max(cam.min, Math.min(
+        canvas.width / (w * (1 + marginFrac * 2)),
+        canvas.height / (h * (1 + marginFrac * 2)))));
+      cam.x = (x0 + x1) / 2;
+      cam.y = (y0 + y1) / 2;
+    },
+
     fit(terrain) {
       const w = terrain.maxX - terrain.minX;
       let lo = Infinity, hi = -Infinity;

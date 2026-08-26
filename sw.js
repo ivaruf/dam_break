@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.4.0'; // touch aiming: offset cursor + deferred start commit
+const VERSION = 'v2.5.0'; // touch v3: press-adjust-lift chains + node dragging
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

@@ -22,9 +22,10 @@ function show(id) {
 
 const TUTORIAL = [
   {
-    title: 'Drag to build',
-    text: 'Press on a yellow anchor and drag to another one. Let go to place a beam. ' +
-      'Anchors are the only places a dam can grip the ground.',
+    title: 'Tap or drag to build',
+    text: 'Tap a yellow anchor, then tap where the beam should end — keep tapping to ' +
+      'chain beams, and tap the glowing joint to finish. (A drag works too.) Anchors ' +
+      'are the only places a dam can grip the ground; the \u2922-style button zooms to the build site.',
   },
   {
     title: 'Triangles hold, squares fold',

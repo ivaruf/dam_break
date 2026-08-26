@@ -1,28 +1,21 @@
-// Touch loupe + aim cursor. FABLE owns.
+// Touch loupe. FABLE owns.
 //
 // On phones the finger hides exactly the spot where a beam is about to land.
-// Touch aiming v2 (see builder.js) answers that by moving the ACTIVE POINT off
-// the fingertip: during a touch build gesture the "cursor" floats
-// CONFIG.touch.cursorOffsetPx above the finger and everything snaps to it. This
-// module draws the two things that make that legible:
-//
-//   1. the CURSOR itself — a crosshair plus a snap-kind ring, on the main
-//      canvas, at builder.touchAim; and
-//   2. the LOUPE — a small magnified circle showing the already-rendered frame
-//      around the CURSOR (ghost, snap rings, members and all), offset so it
-//      never sits under the hand.
-//
-// The loupe is a plain blit of the current canvas, not a re-render, so it is
+// While a single-touch gesture is active in the build phase, this draws a small
+// magnified circle OFFSET from the finger, showing the already-rendered frame
+// around the FINGERTIP — ghost, snap rings, chain head, lifted node, members and
+// all. It is a plain blit of the current canvas, not a re-render, so it is
 // visually always consistent with the frame and costs one small drawImage.
-// The cursor marker is drawn AFTER the region is grabbed, so the loupe shows
-// the frame rather than a magnified picture of its own crosshair.
 //
-// When there is no aim cursor — the erase and box-delete tools deliberately
-// stay on the raw fingertip — the loupe falls back to the finger position and
-// no cursor marker is drawn. Mouse and pen never see any of it (the pointer
-// occludes nothing), and it only exists in the build phase. Placement prefers
-// above the cursor, falls back to beside it near the top edge, and always
-// stays fully on screen.
+// Touch building v3 (see builder.js) is why this is centred on the fingertip
+// again: v2.4 moved the active point 56 px above the finger and centred the
+// loupe there, which meant the magnifier showed a place the player was not
+// touching. The finger goes where the beam goes; the loupe is what lets them
+// see under it. It follows a node drag for free, since that is the same finger.
+//
+// Mouse and pen never see it (the cursor doesn't occlude anything), and it
+// only exists in the build phase. Placement prefers above the finger, falls
+// back to beside it near the top edge, and always stays fully on screen.
 
 import { CONFIG } from '../config.js';
 import { on } from '../core/events.js';
@@ -55,28 +48,22 @@ export function render(ctx, S) {
   const d = cw > 0 ? canvas.width / cw : 1;
   const dpr = d > 0.1 && d < 8 ? d : 1;
 
-  // the builder's offset aim cursor when there is one, else the fingertip
-  const B = getBuilder();
-  const aim = (B && B.touchAim) || null;
-  const fx = aim ? aim.px : L.px;
-  const fy = aim ? aim.py : L.py;
-
   const rad = R.radiusPx * dpr;
   const srcR = rad / R.zoom;
 
   // source region, clamped fully onto the canvas so the blit never samples void
-  const sx = clamp(fx, srcR, canvas.width - srcR);
-  const sy = clamp(fy, srcR, canvas.height - srcR);
+  const sx = clamp(L.px, srcR, canvas.width - srcR);
+  const sy = clamp(L.py, srcR, canvas.height - srcR);
 
-  // loupe placement: above the cursor; beside it when the top is too close
+  // loupe placement: above the finger; beside it when the top is too close
   const off = R.offsetPx * dpr;
   const margin = 4 * dpr;
-  let cx = fx;
-  let cy = fy - off;
+  let cx = L.px;
+  let cy = L.py - off;
   if (cy - rad < R.topClearancePx * dpr) {
-    cy = fy;
-    cx = fx - off;
-    if (cx - rad < margin) cx = fx + off;
+    cy = L.py;
+    cx = L.px - off;
+    if (cx - rad < margin) cx = L.px + off;
   }
   cx = clamp(cx, rad + margin, canvas.width - rad - margin);
   cy = clamp(cy, rad + margin, canvas.height - rad - margin);
@@ -94,14 +81,12 @@ export function render(ctx, S) {
   g.clearRect(0, 0, need, need);
   g.drawImage(canvas, sx - srcR, sy - srcR, srcR * 2, srcR * 2, 0, 0, need, need);
 
-  // ring color tells validity at a glance: ghost ok/bad, neutral otherwise —
-  // and while the gesture is still AIMING there is no ghost yet, so the cursor
-  // and the loupe both read neutral until the beam has a direction
-  const ring = B && B.ghost ? (B.ghost.ok ? R.ringOk : R.ringBad)
-    : (B && (B.tool === 'erase' || B.tool === 'boxdelete')) ? R.ringBad : R.ringNeutral;
-
-  // the aim cursor, on the frame itself (after the grab: see the header)
-  if (aim) drawCursor(ctx, aim, dpr, ring);
+  // ring color tells validity at a glance: a lifted node or a ghost beam says
+  // ok/bad, a delete tool is always bad news for something, neutral otherwise
+  const B = getBuilder();
+  const live = B.nodeDrag || B.ghost;
+  const ring = live ? (live.ok ? R.ringOk : R.ringBad)
+    : (B.tool === 'erase' || B.tool === 'boxdelete') ? R.ringBad : R.ringNeutral;
 
   ctx.save();
   // drop ring for contrast against any backdrop
@@ -116,9 +101,9 @@ export function render(ctx, S) {
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(cache, 0, 0, need, need, cx - rad, cy - rad, rad * 2, rad * 2);
 
-  // crosshair at the cursor's true position inside the magnified region
-  const tx = cx + (fx - sx) * R.zoom;
-  const ty = cy + (fy - sy) * R.zoom;
+  // crosshair at the pointer's true position inside the magnified region
+  const tx = cx + (L.px - sx) * R.zoom;
+  const ty = cy + (L.py - sy) * R.zoom;
   const ch = R.crossPx * dpr;
   ctx.strokeStyle = R.cross;
   ctx.lineWidth = Math.max(1, dpr);
@@ -135,35 +120,4 @@ export function render(ctx, S) {
   ctx.strokeStyle = ring;
   ctx.lineWidth = R.ringPx * dpr;
   ctx.stroke();
-}
-
-// The aim cursor: a gapped crosshair on the exact point, inside a ring whose
-// RADIUS is the snap kind (node > anchor > grid dot) and whose COLOUR is the
-// loupe's validity family. Small on purpose — the loupe is the magnifier, this
-// is just the truthful marker of where the beam lands.
-function drawCursor(ctx, aim, dpr, color) {
-  const R = CONFIG.loupe;
-  const rings = R.cursorRingPx;
-  const r = ((rings && rings[aim.kind]) || (rings && rings.grid) || 6) * dpr;
-  const arm = R.cursorCrossPx * dpr;
-  const gap = R.cursorGapPx * dpr;
-
-  ctx.save();
-  ctx.globalAlpha = R.cursorAlpha;
-
-  ctx.beginPath();
-  ctx.arc(aim.px, aim.py, r, 0, Math.PI * 2);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1, R.cursorRingLinePx * dpr);
-  ctx.stroke();
-
-  ctx.strokeStyle = R.cross;
-  ctx.lineWidth = Math.max(1, R.cursorLinePx * dpr);
-  ctx.beginPath();
-  ctx.moveTo(aim.px - arm, aim.py); ctx.lineTo(aim.px - gap, aim.py);
-  ctx.moveTo(aim.px + gap, aim.py); ctx.lineTo(aim.px + arm, aim.py);
-  ctx.moveTo(aim.px, aim.py - arm); ctx.lineTo(aim.px, aim.py - gap);
-  ctx.moveTo(aim.px, aim.py + gap); ctx.lineTo(aim.px, aim.py + arm);
-  ctx.stroke();
-  ctx.restore();
 }

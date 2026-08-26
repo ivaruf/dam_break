@@ -369,15 +369,21 @@ sizing (min 44px touch targets).
   too long, outside buildZone, inside terrain).
 - Keys: 1–4 materials, Space release/pause, R retry, Delete remove selection,
   X box-delete tool, E erase.
-- TOUCH AIMING (build tool, touch only): the active point is an OFFSET CURSOR
-  CONFIG.touch.cursorOffsetPx above the fingertip (shrinks smoothly within
-  topClearancePx of the top edge); pointer-down opens an AIMING state whose
-  provisional start re-snaps to the cursor until displacement exceeds
-  startCommitPx (capped at commitMaxFrac·maxLength in screen px), then the
-  start locks and the drag draws. Release while aiming = tap at the RAW
-  fingertip. Builder publishes getBuilder().touchAim = null | {x, y, px, py,
-  kind, aiming}; rendering/loupe.js draws the cursor + magnifier from it.
-  Erase/boxdelete stay on raw finger coords. Mouse/pen unchanged.
+- TOUCH BUILDING v3 (build tool, touch only) — PRESS-ADJUST-LIFT: every press
+  previews at the SNAPPED fingertip (loupe magnifies it), sliding re-snaps,
+  LIFT commits — never mid-gesture. Chain: a commit's endpoint becomes the
+  pulsing CHAIN HEAD; the next press previews a beam from it; end the chain by
+  tapping the head, switching tool, the BUILD button, phase change, or undo.
+  Touch snapping uses CONFIG.touch.snapMul (2.0) on node/anchor radii
+  (snapPoint opts: radiusMul/ignoreNodeId/noNodes). Touch build never selects;
+  erase/boxdelete stay on raw finger coords. Mouse/pen fully unchanged.
+- NODE DRAGGING (mouse + touch): press-and-hold CONFIG.touch.holdMs (350 ms,
+  slop holdSlopPx) on a design node lifts it; it follows the snapped pointer
+  (anchors/grid only), attached members recompute live with validity; valid
+  lift = ONE undo step (anchorId gained/lost on drop), invalid = full revert.
+  Builder publishes getBuilder().chainHead {x,y,nodeId,anchorId,kind,pending}
+  and .nodeDrag {nodeId,x,y,anchorId,ok,reason,touch,orig,members,snap};
+  design:change gains {action:'move', id}. loupe.js is finger-centred.
 - Budget: cost = Σ len·costPerMeter; builder refuses placement over budget.
 - modes.js runs objectives: track retention via `water.volumeBetween` +
   `stats.totalIn`, protect-zone depth via `depthAt`, survival timer, and emits

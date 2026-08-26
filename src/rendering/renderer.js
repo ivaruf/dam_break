@@ -28,6 +28,13 @@ const TAU = Math.PI * 2;
 let W = 0, H = 0, cx = 0, cy = 0;
 let camX = 0, camY = 0, zoom = 1, shX = 0, shY = 0, dpr = 1;
 
+// Frames drawn, monotonic. The build phase has no simTime to breathe against
+// (it is 0 until the water is released) and Date.now()/Math.random() would make
+// two runs of the same level draw different frames — this file's whole rule. So
+// the chain-head pulse is a function of the frame COUNT: deterministic, and
+// still smooth on any display that is actually painting.
+let frames = 0;
+
 const SX = (x) => (x - camX) * zoom + cx + shX;
 const SY = (y) => cy - (y - camY) * zoom + shY;
 
@@ -39,6 +46,7 @@ function beginFrame(ctx, cam) {
   const cw = ctx.canvas.clientWidth;
   const d = cw > 0 ? W / cw : 1;
   dpr = d > 0.1 && d < 8 ? d : 1;
+  frames++;
 }
 
 export function init() {
@@ -239,7 +247,7 @@ export function render(ctx, cam, S) {
     drawDesign(ctx, S.design);
   }
 
-  if (build) { drawGhost(ctx); drawMarquee(ctx); }
+  if (build) { drawGhost(ctx); drawMarquee(ctx); drawChainHead(ctx); drawLiftedNode(ctx); }
 
   ctx.restore();
 }
@@ -1175,6 +1183,73 @@ function drawGhost(ctx) {
     ? g.len.toFixed(1) + ' m  ·  $' + Math.round(g.cost)
     : (g.reason ? String(g.reason).toUpperCase() : 'CANNOT BUILD');
   labelAt(ctx, txt, SX(g.x1), SY(g.y1) - 20 * dpr, g.ok ? R.ghostOk : R.ghostBad, false);
+}
+
+// ---- touch building v3: chain head + lifted node ------------------------
+//
+// Both are read from getBuilder() and nowhere else: the builder owns what the
+// gesture MEANS, this file only says what it looks like.
+
+// The joint the next touch press will build from. It pulses because it is the
+// one mark on screen that is a PROMISE rather than a fact — and because it is
+// also the button that ends the run ("tap the glowing joint to finish"). Drawn
+// even when the head is PENDING, i.e. a point the player has claimed that is
+// not a design node yet: without this, the first tap of a chain would appear to
+// do nothing at all.
+function drawChainHead(ctx) {
+  const B = getBuilder();
+  const h = B && B.chainHead;
+  if (!h || !isFinite(h.x) || !isFinite(h.y)) return;
+  const px = SX(h.x), py = SY(h.y);
+  const pad = 40 * dpr;
+  if (px < -pad || px > W + pad || py < -pad || py > H + pad) return;
+
+  const breath = Math.sin((frames % R.chainHeadPulseFrames) / R.chainHeadPulseFrames * TAU);
+  const r = R.chainHeadPx * dpr * (1 + R.chainHeadPulse * breath);
+
+  ctx.save();
+  ctx.globalAlpha = R.chainHeadAlpha;
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, TAU);
+  ctx.strokeStyle = R.chainHeadColor;
+  ctx.lineWidth = Math.max(1.5, R.chainHeadLinePx * dpr);
+  ctx.stroke();
+  // solid core: a pending head is not in design.nodes, so nothing else draws it
+  ctx.beginPath();
+  ctx.arc(px, py, Math.max(1.6, R.nodePx * dpr * 0.85), 0, TAU);
+  ctx.fillStyle = R.chainHeadColor;
+  ctx.fill();
+  ctx.restore();
+}
+
+// A node in the air. The members already follow it (the builder moves the design
+// node itself), so all this adds is "you are holding this one" — and RED the
+// moment the drop would be illegal, with the reason spelled out in the ghost's
+// own voice.
+function drawLiftedNode(ctx) {
+  const B = getBuilder();
+  const nd = B && B.nodeDrag;
+  if (!nd || !isFinite(nd.x) || !isFinite(nd.y)) return;
+  const px = SX(nd.x), py = SY(nd.y);
+  const col = nd.ok ? R.dragNodeColor : R.ghostBad;
+  const r = R.dragNodePx * dpr;
+
+  ctx.save();
+  ctx.globalAlpha = R.dragNodeGlowAlpha;
+  ctx.beginPath();
+  ctx.arc(px, py, r + R.dragNodeGlowPx * dpr, 0, TAU);
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, TAU);
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.restore();
+
+  if (!nd.ok && nd.reason) {
+    labelAt(ctx, String(nd.reason).toUpperCase(), px, py - 20 * dpr, R.ghostBad, true);
+  }
 }
 
 // ---- box-delete marquee -------------------------------------------------

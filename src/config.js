@@ -411,6 +411,38 @@ export const CONFIG = {
     marqueeCursorPx: 11,            // half-size of the idle box-delete cursor
     marqueeMinPx: 3,                // below this the rect is a click, not a box
 
+    // ---- TOUCH BUILDING v3 cues (renderer.js reads builder state only) -----
+    // The CHAIN HEAD is the joint the next touch press builds from, and it is
+    // the only thing on screen that is not simply "the design": it has to say
+    // "you are mid-run, tap me to stop". So it pulses — deterministically, off
+    // the renderer's own frame counter (never Date.now/Math.random, so two runs
+    // of the same level draw the same frames), and it is drawn even when it is
+    // still PENDING, i.e. a point the player has claimed that is not a design
+    // node yet (an unconnected node would be an orphan; the design never has
+    // one).
+    chainHeadPx: 7.5,               // ring radius, device px, at mid-breath
+    chainHeadColor: '#7fff9a',      // the ghost's own OK green: "build from here"
+    chainHeadLinePx: 2.2,
+    chainHeadAlpha: 0.9,
+    chainHeadPulse: 0.32,           // ± fraction of the radius over one breath
+    chainHeadPulseFrames: 72,       // frames per breath (~1.2 s at 60 Hz)
+
+    // A node LIFTED by a press-and-hold drag: bigger than a design node, with a
+    // soft halo so it reads as "in the air", and red the moment the move would
+    // be illegal (a beam past its material's span, over budget, out of zone).
+    dragNodePx: 6.5,
+    dragNodeColor: '#ffffff',
+    dragNodeGlowPx: 7,
+    dragNodeGlowAlpha: 0.22,
+
+    // ---- frame-the-build-zone button (hud.js -> camera.fitZone) ------------
+    zoneFrameHeadroom: 8,           // m of world above the zone's lowest ground
+    zoneFrameBelow: 1,              // …and m below it: the anchors sit ON that
+                                    // line and a dam needs its foundation in
+                                    // shot, so the ground is never the very
+                                    // last row of pixels
+    zoneFrameSamples: 24,           // terrain samples across the zone
+
     // ghost + labels
     ghostOk: '#7fff9a',
     ghostBad: '#ff6a5a',
@@ -809,11 +841,14 @@ export const CONFIG = {
     },
   },
 
-  // touch loupe: the magnifier that keeps a finger from hiding the snap point
+  // Touch loupe: the magnifier that keeps a finger from hiding the point it is
+  // placing. Centred on the FINGERTIP (touch building v3 has no offset cursor —
+  // the snapped preview and its snap rings are drawn in the frame itself, and
+  // the loupe's job is only to let the player SEE them under their own hand).
   loupe: {
     radiusPx: 52,          // circle radius (CSS px)
     zoom: 2.2,             // magnification of the frame region
-    offsetPx: 88,          // aim cursor -> loupe centre distance
+    offsetPx: 88,          // fingertip -> loupe centre distance
     topClearancePx: 96,    // don't collide with the HUD top row
     ringPx: 3,
     ringOk: '#7fff9a',
@@ -822,41 +857,28 @@ export const CONFIG = {
     cross: 'rgba(230, 245, 255, 0.9)',
     crossPx: 10,
     backing: 'rgba(6, 12, 18, 0.7)',
-
-    // ---- the aim cursor itself, drawn on the MAIN canvas (touch aiming v2) --
-    // The loupe shows you the neighbourhood; this marks the exact point the
-    // beam will land on, in the frame, at the cursor. Ring size encodes the
-    // snap kind (a node is a bigger promise than a grid dot); ring COLOUR is
-    // the loupe's own ok/bad/neutral family, so one glance reads both.
-    cursorCrossPx: 9,      // crosshair arm length (CSS px)
-    cursorGapPx: 3,        // hole in the middle: never cover the snap point
-    cursorLinePx: 1.6,
-    cursorRingPx: { node: 9.5, anchor: 8, grid: 5.5 },
-    cursorRingLinePx: 2,
-    cursorAlpha: 0.95,
   },
 
-  // ---- TOUCH AIMING v2 (Fable) ------------------------------------------
-  // A mouse hovers before it commits; a finger's first contact is blind, and
-  // it lands on the one spot the player needs to see. Two knobs fix that, and
-  // they apply to TOUCH + the BUILD tool only — mouse and pen are untouched,
-  // and erase/box-delete stay on the raw fingertip (see builder.js).
+  // ---- TOUCH BUILDING v3: PRESS-ADJUST-LIFT (Fable) ----------------------
+  // A finger has no hover, no point and no patience for a two-stage gesture.
+  // v2.4's offset cursor + deferred start failed playtest for exactly that
+  // reason: the gesture changed its mind mid-press. v3 never does — every touch
+  // press shows a live preview at the SNAPPED FINGERTIP, sliding adjusts it,
+  // and the LIFT commits. These knobs apply to TOUCH gestures (mouse and pen
+  // keep drag-to-draw untouched) plus the node drag, which both share.
   touch: {
-    cursorOffsetPx: 56,    // the active point floats this far ABOVE the
-                           // fingertip (CSS px). Everything snaps to the
-                           // CURSOR, so the finger never hides the target.
-    topClearancePx: 100,   // near the top edge the offset shrinks smoothly to
-                           // keep the cursor on canvas and clear of the HUD:
-                           // effOffset = min(cursorOffsetPx, fingerY − this).
-    startCommitPx: 26,     // cursor travel (CSS px, displacement from the
-                           // touch-down cursor) before the beam START locks.
-                           // Under it the gesture is still AIMING: the start
-                           // re-snaps to the cursor, and a release is a tap.
-    commitMaxFrac: 0.5,    // …but never more than this fraction of the
-                           // material's maxLength in screen px. A phone fits a
-                           // whole valley at ~7 px/m, where 26 px is 3.7 m —
-                           // longer than concrete may span. Inert at any zoom
-                           // where the grid is big enough to aim at.
+    snapMul: 2.0,          // node/anchor snap radii × this for a touch gesture.
+                           // The grid stays 0.5 m: a thumb does not need a finer
+                           // grid, it needs the preview to POP decisively onto
+                           // the joint it is near instead of hovering off it.
+    holdMs: 350,           // press-and-HOLD this long on an existing design node
+                           // and the node lifts into a drag (mouse too)
+    holdSlopPx: 10,        // CSS px of travel allowed during that hold. Past it
+                           // the gesture is a slide — a beam, not a node move.
+    tapMaxPx: 14,          // CSS px of travel under which a press+lift counts as
+                           // a TAP. Looser than the mouse's CONFIG.build.tapMaxPx
+                           // because a thumb rolls as it leaves the glass; a tap
+                           // on the chain head is what ENDS a chain.
   },
 
   levels: {

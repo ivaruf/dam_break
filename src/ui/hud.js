@@ -26,11 +26,17 @@ const last = {
   budgetPct: -1, budgetLow: null, timer: '', urgent: null, hint: '', hintKind: '',
   matList: '', matActive: '', matAfford: '', tool: '', undo: null, redo: null,
   speed: -1, load: '', retained: '', objPct: -1, objBad: null, release: null,
-  showTimer: null, fadeL: null, fadeR: null,
+  showTimer: null, fadeL: null, fadeR: null, zoneBtn: null,
 };
 
 let lastToast = 0;
 let eventToastAt = 0;
+
+// The scene last handed to update(). The frame-build-zone button needs the LIVE
+// camera and terrain, and hud.js is downstream of game.js in the import graph —
+// so it borrows the scene it is already given every frame rather than importing
+// its way back up.
+let scene = null;
 
 export function init() {
   const ids = [
@@ -58,6 +64,7 @@ export function init() {
   bind(D['btn-undo'], () => emit('ui:undo', {}));
   bind(D['btn-redo'], () => emit('ui:redo', {}));
   bind(D['btn-clear'], () => emit('ui:clear', {}));
+  makeZoneButton();
 
   for (const b of document.querySelectorAll('.speed-btn')) {
     b.addEventListener('click', () => emit('ui:speed', { v: parseFloat(b.dataset.speed) }));
@@ -85,6 +92,49 @@ export function init() {
 
 function bind(node, fn) {
   if (node) node.addEventListener('click', fn);
+}
+
+// ---- frame the build zone ------------------------------------------------
+//
+// A phone that fits the whole valley on screen puts the 0.5 m build grid at
+// three or four pixels — smaller than the error in a fingertip, which is the
+// real reason touch building felt hopeless before you could get close. One
+// press frames the zone: the whole legal area, at a zoom where a grid cell is
+// bigger than the thumb aiming at it. Built here rather than in index.html
+// because it is a BUILD-phase affordance whose visibility is a function of the
+// level (no build zone, no button), and hud.js is where that lives.
+function makeZoneButton() {
+  const group = D['tool-group'];
+  if (!group || typeof document.createElement !== 'function') return;
+  const b = document.createElement('button');
+  b.id = 'btn-framezone';
+  b.className = 'tool-btn';
+  b.type = 'button';
+  b.title = 'Frame the build zone — zoom in so the grid is bigger than your finger';
+  if (typeof b.setAttribute === 'function') b.setAttribute('aria-label', 'Frame the build zone');
+  b.textContent = '⛶';
+  b.addEventListener('click', frameZone);
+  group.appendChild(b);
+  D['btn-framezone'] = b;
+}
+
+// camera.fitZone(x0, y0, x1, y1) frames a world rect. The y range is the LOWEST
+// ground under the zone up to zoneFrameHeadroom above it: the dam is built up
+// from the valley floor, so the floor is the anchor of the shot and the
+// headroom is where the crest will be.
+function frameZone() {
+  const S = scene;
+  const cam = S && S.camera;
+  const bz = S && S.level && S.level.buildZone;
+  if (!cam || !bz || typeof cam.fitZone !== 'function') return;
+  const t = S.terrain;
+  let lo = Infinity;
+  if (t && typeof t.heightAt === 'function') {
+    const n = Math.max(2, R.zoneFrameSamples);
+    for (let i = 0; i <= n; i++) lo = Math.min(lo, t.heightAt(bz.x0 + (bz.x1 - bz.x0) * (i / n)));
+  }
+  if (!Number.isFinite(lo)) lo = cam.y - R.zoneFrameHeadroom * 0.5;
+  cam.fitZone(bz.x0, lo - R.zoneFrameBelow, bz.x1, lo + R.zoneFrameHeadroom);
 }
 
 // A clipped material strip has to LOOK clipped, or the player concludes there
@@ -157,6 +207,7 @@ function eventToast(text) {
 // ---- per-frame update ---------------------------------------------------
 
 export function update(S) {
+  scene = S;
   const inGame = S.phase === 'build' || S.phase === 'sim';
   if (last.phase !== S.phase) {
     D['hud'].classList.toggle('hidden', !inGame);
@@ -203,7 +254,7 @@ export function update(S) {
 
   if (build) {
     updateMaterials(S, left);
-    updateTools();
+    updateTools(S);
     updateHint(S);
   } else {
     updateSim(S);
@@ -361,8 +412,18 @@ function updateMaterials(S, left) {
 // than lighting the wrong thing.
 const TOOL_BTN = { build: 'btn-tool-build', erase: 'btn-erase', boxdelete: 'btn-boxdelete' };
 
-function updateTools() {
+function updateTools(S) {
   const B = getBuilder() || {};
+
+  // no build zone in this level, nothing to frame: the button is not a no-op,
+  // it is absent
+  const zone = !!(S && S.level && S.level.buildZone);
+  if (last.zoneBtn !== zone) {
+    last.zoneBtn = zone;
+    const node = D['btn-framezone'];
+    if (node) node.classList.toggle('hidden', !zone);
+  }
+
   const tool = B.tool || 'build';
   if (last.tool !== tool) {
     last.tool = tool;
@@ -377,16 +438,21 @@ function updateTools() {
   if (last.redo !== r) { last.redo = r; D['btn-redo'].disabled = !r; }
 }
 
-// One line, one job: a refusal always wins over teaching, and the teaching text
-// steps forward as the player actually builds something.
+// One line, one job: a refusal always wins over teaching, a live touch chain
+// outranks the level's opening advice (it is about the gesture in the player's
+// hand right now), and the teaching text steps forward as they build.
 function updateHint(S) {
   let text = '';
   let kind = '';
 
   const reason = getHint();          // '' once the refusal has gone stale
+  const chain = (getBuilder() || {}).chainHead;
   if (reason) {
     text = reason.toUpperCase();
     kind = 'warn';
+  } else if (chain) {
+    text = 'Tap to extend — tap the glowing joint to finish';
+    kind = 'info';
   } else {
     const hints = S.level.hints || [];
     const built = S.design ? S.design.members.length : 0;

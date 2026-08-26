@@ -88,17 +88,34 @@ export function memberLength(design, m, map) {
 // ---- snapping -------------------------------------------------------------
 
 // Returns {x, y, nodeId|null, anchorId|null, kind:'node'|'anchor'|'grid'}.
-// opts.chainNodeId gets an enlarged radius so chain-building off the endpoint
-// you just placed is forgiving (CONFIG.build.chainSnapMul).
+//
+// opts (all optional; omitting every one of them is the original mouse
+// behaviour, unchanged):
+//   chainNodeId  this node gets an enlarged radius, so chain-building off the
+//                endpoint you just placed is forgiving (CONFIG.build.chainSnapMul)
+//   radiusMul    multiplies the NODE and ANCHOR radii — CONFIG.touch.snapMul
+//                for touch gestures, so the preview endpoint pops decisively
+//                onto a joint. The GRID is deliberately not scaled: it is a
+//                quantisation, not a target, and 0.5 m is 0.5 m on every input.
+//   ignoreNodeId this node is invisible to the snap (the node a drag is HOLDING
+//                must not snap to itself, and it must not merge the grid point
+//                under it back onto itself either)
+//   noNodes      skip design nodes entirely: anchors and the grid only. Dropping
+//                a dragged node exactly onto another one would make a coincident
+//                pair, not a joint.
 export function snapPoint(x, y, design, terrain, opts) {
   const B = CONFIG.build;
-  const chainId = (opts && opts.chainNodeId) || null;
+  const o = opts || {};
+  const chainId = o.chainNodeId || null;
+  const mul = o.radiusMul > 0 ? o.radiusMul : 1;
+  const ignore = o.ignoreNodeId || null;
 
   // 1. existing design nodes (nearest wins)
   let best = null, bestD = Infinity;
-  if (design) {
+  if (design && !o.noNodes) {
     for (const n of design.nodes) {
-      const r = n.id === chainId ? B.nodeSnap * B.chainSnapMul : B.nodeSnap;
+      if (n.id === ignore) continue;
+      const r = (n.id === chainId ? B.nodeSnap * B.chainSnapMul : B.nodeSnap) * mul;
       const d = Math.hypot(n.x - x, n.y - y);
       if (d <= r && d < bestD) { bestD = d; best = n; }
     }
@@ -111,7 +128,7 @@ export function snapPoint(x, y, design, terrain, opts) {
   let anchor = null, anchorD = Infinity;
   if (terrain && terrain.anchors) {
     for (const a of terrain.anchors) {
-      const r = a.r !== undefined ? a.r : B.anchorSnap;
+      const r = (a.r !== undefined ? a.r : B.anchorSnap) * mul;
       const d = Math.hypot(a.x - x, a.y - y);
       if (d <= r && d < anchorD) { anchorD = d; anchor = a; }
     }
@@ -119,7 +136,11 @@ export function snapPoint(x, y, design, terrain, opts) {
   if (anchor) {
     // reuse the node already sitting on this anchor, if any
     let existing = null;
-    if (design) for (const n of design.nodes) if (n.anchorId === anchor.id) { existing = n; break; }
+    if (design) {
+      for (const n of design.nodes) {
+        if (n.id !== ignore && n.anchorId === anchor.id) { existing = n; break; }
+      }
+    }
     return {
       x: anchor.x, y: anchor.y,
       nodeId: existing ? existing.id : null,
@@ -131,8 +152,9 @@ export function snapPoint(x, y, design, terrain, opts) {
   // 3. grid — but never invent a second node on top of an existing one
   const g = B.gridSnap;
   const gx = Math.round(x / g) * g, gy = Math.round(y / g) * g;
-  if (design) {
+  if (design && !o.noNodes) {
     for (const n of design.nodes) {
+      if (n.id === ignore) continue;
       if (Math.abs(n.x - gx) <= B.mergeEps && Math.abs(n.y - gy) <= B.mergeEps) {
         return { x: n.x, y: n.y, nodeId: n.id, anchorId: n.anchorId || null, kind: 'node' };
       }

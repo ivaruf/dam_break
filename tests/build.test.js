@@ -1024,20 +1024,18 @@ section('9. FUZZ — EDITING INVARIANTS');
   ok(builder.canUndo() || builder.canRedo() || design.members.length === 0,
     'the fuzz leaves a coherent history');
 }
-
-// ------------------------------------------- 10. TOUCH AIMING v2 (cursor) ---
-// A finger has no hover and no point: its first contact blindly commits the
-// beam start, under the one spot the player needs to see. Touch aiming v2 gives
-// a touch BUILD gesture an offset AIM CURSOR (CONFIG.touch.cursorOffsetPx above
-// the fingertip, everything snaps to it) and a DEFERRED START (provisional and
-// re-snapping until the cursor has travelled startCommitPx). Mouse, pen, and
-// the erase/box-delete tools keep the raw-fingertip behaviour exactly.
+// ------------------------------------------ 10. TOUCH BUILDING v3 (press) ---
+// PRESS-ADJUST-LIFT. Every touch press with the build tool previews at the
+// SNAPPED FINGERTIP, sliding re-snaps the preview, and the LIFT commits —
+// nothing changes mid-gesture, ever. A committed lift leaves a CHAIN HEAD, so a
+// run of beams is tap-tap-tap, and a tap on the head itself finishes it.
+// (v2.4's offset cursor and deferred start are gone; so is selection on touch
+// with the build tool — every build press is a placement.)
 //
-// These tests need a camera that really unprojects: sections 5–9 drive px/py as
-// -y·Z, which is fine for travel thresholds but meaningless as a screen
-// coordinate, and "56 px above the finger" only means something on a real one.
+// These tests drive a phone-shaped screen so the px thresholds
+// (CONFIG.touch.tapMaxPx / holdSlopPx) mean what they mean on glass.
 
-section('10. TOUCH AIMING v2 — OFFSET CURSOR + DEFERRED START');
+section('10. TOUCH BUILDING v3 — PRESS-ADJUST-LIFT + CHAINS');
 {
   const T = CONFIG.touch;
   const S = getScene();
@@ -1046,7 +1044,6 @@ section('10. TOUCH AIMING v2 — OFFSET CURSOR + DEFERRED START');
   S.phase = 'build'; S.level = L; S.terrain = TERRAIN; S.design = design;
   S.structure = null; S.water = null; S.simTime = 0;
 
-  // phone-shaped canvas, dpr 1 (no DOM headless → CSS px == device px)
   const Z = 14, W = 500, H = 850, CX = 29, CY = 5;
   S.camera = {
     zoom: Z,
@@ -1054,229 +1051,228 @@ section('10. TOUCH AIMING v2 — OFFSET CURSOR + DEFERRED START');
   };
   const sx = (x) => (x - CX) * Z + W / 2;         // world → device px
   const sy = (y) => H / 2 - (y - CY) * Z;
-  const OFF = T.cursorOffsetPx;
+  const at = (x, y) => ({ x, y, px: sx(x), py: sy(y) });
   const B = builder.getBuilder();
-
-  // a finger that puts the CURSOR on world (x, y) …
-  const aimAt = (x, y) => {
-    const px = sx(x), py = sy(y) + OFF;
-    const [wx, wy] = S.camera.screenToWorld(px, py);
-    return { x: wx, y: wy, px, py };
-  };
-  // … and a finger that is itself on world (x, y)
-  const fingerAt = (x, y) => ({ x, y, px: sx(x), py: sy(y) });
 
   const tdown = (f) => emit('input:down', { ...f, id: 1, button: 0, cancel: false, ptype: 'touch' });
   const tmove = (f) => emit('input:move', { ...f, id: 1, button: 0, cancel: false, hover: false, ptype: 'touch' });
   const tup = (f, cancel) => emit('input:up', { ...f, id: 1, button: 0, cancel: !!cancel, ptype: 'touch' });
 
-  // mouse/pen driver on the same camera (no ptype = mouse)
+  // the whole touch vocabulary: a tap, and a press that slides before it lifts
+  const tap = (x, y) => { const f = at(x, y); tdown(f); tup(f); };
+  const slide = (x0, y0, x1, y1, cancel) => {
+    tdown(at(x0, y0)); tmove(at(x1, y1)); tup(at(x1, y1), cancel);
+  };
+
+  // mouse/pen on the same screen (no ptype = mouse)
   const put = (x0, y0, x1, y1, ptype) => {
-    const a = fingerAt(x0, y0), b = fingerAt(x1, y1);
-    emit('input:down', { ...a, id: 1, button: 0, cancel: false, ptype });
-    emit('input:move', { ...b, id: 1, button: 0, cancel: false, hover: false, ptype });
-    emit('input:up', { ...b, id: 1, button: 0, cancel: false, ptype });
+    emit('input:down', { ...at(x0, y0), id: 1, button: 0, cancel: false, ptype });
+    emit('input:move', { ...at(x1, y1), id: 1, button: 0, cancel: false, hover: false, ptype });
+    emit('input:up', { ...at(x1, y1), id: 1, button: 0, cancel: false, ptype });
   };
 
   const reset = () => {
     design.nodes.length = 0; design.members.length = 0;
     builder.startLevel(L, TERRAIN, design);
   };
+  const nodeAt = (x, y) => design.nodes.find((n) =>
+    Math.abs(n.x - x) < 1e-6 && Math.abs(n.y - y) < 1e-6);
 
-  // ---- A. the cursor floats above the finger, and IT is what snaps ---------
+  // ---- A. three taps, two beams: the chain IS the gesture -----------------
   reset();
   {
-    const f = aimAt(26, 3);                        // anchor a0 sits at (26, 3)
-    tdown(f);
-    ok(B.touchAim !== null, 'a touch build gesture publishes B.touchAim on down');
-    eq(B.touchAim.aiming, true, 'the gesture opens in the aiming state');
-    near(B.touchAim.px, f.px, 1e-9, 'the cursor keeps the finger x');
-    near(B.touchAim.py, f.py - OFF, 1e-9, 'the cursor floats cursorOffsetPx ABOVE the finger');
-    ok(B.touchAim.py < f.py, 'the cursor is above the finger in screen space');
-    near(B.touchAim.x, 26, 1e-9, 'the cursor world x is where the player is aiming');
-    near(B.touchAim.y, 3, 1e-9, 'the cursor world y is where the player is aiming');
-    near(f.y, 3 - OFF / Z, 1e-9, 'the FINGER itself is a whole ' + (OFF / Z).toFixed(1) + ' m lower');
-    eq(B.touchAim.kind, 'anchor', 'touchAim reports the snap kind under the cursor');
-    ok(B.hover && B.hover.snap && B.hover.snap.anchorId === 'a0',
-      'the provisional start snapped to the anchor the CURSOR is over');
-    eq(snapPoint(f.x, f.y, design, TERRAIN).kind, 'grid',
-      'the raw fingertip is over nothing — the anchor was found by the cursor alone');
-    tup(f, true);                                  // discard
-    eq(B.touchAim, null, 'B.touchAim is cleared when the gesture ends');
+    tap(27.3, 5.4);                                // open ground
+    eq(design.members.length, 0, 'the first tap on open ground builds nothing');
+    eq(design.nodes.length, 0, 'and creates no node: an unconnected node is an orphan');
+    ok(!!B.chainHead, 'it claims a CHAIN HEAD instead');
+    eq(B.chainHead.pending, true, 'which is PENDING — a point, not a design node');
+    near(B.chainHead.x, 27.5, 1e-9, 'the head sits at the SNAPPED lift position (x)');
+    near(B.chainHead.y, 5.5, 1e-9, '… and y (0.5 m grid, not the raw fingertip)');
+    eq(B.ghost, null, 'no preview outlives the press');
+    eq(B.drag, null, 'and no drag record either');
+
+    tap(27.6, 7.4);                                // second tap: the first beam
+    eq(design.members.length, 1, 'the second tap places a beam from the head');
+    eq(design.nodes.length, 2, 'with both endpoints created');
+    ok(!!nodeAt(27.5, 5.5) && !!nodeAt(27.5, 7.5), 'between the two snapped tap points');
+    eq(B.chainHead.pending, false, 'the head is now a real design node');
+    eq(B.chainHead.nodeId, nodeAt(27.5, 7.5).id, 'and it is the endpoint just placed');
+
+    tap(29.4, 7.4);                                // third tap: the second beam
+    eq(design.members.length, 2, 'the third tap extends the chain');
+    eq(design.nodes.length, 3, 'sharing the joint instead of duplicating it');
+    eq(B.chainHead.nodeId, nodeAt(29.5, 7.5).id, 'the head advanced to the new endpoint');
+    near(builder.designCost(design), 4 * MATERIALS.timber.costPerMeter, 1e-6,
+      'two 2 m timber beams cost what two 2 m timber beams cost');
   }
 
-  // ---- B. release while aiming = TAP, at the RAW fingertip -----------------
+  // ---- B. the LIFT position is what commits (press-adjust-lift) -----------
+  // Everything here stays 3 m clear of the anchors at y = 3: a touch anchor
+  // radius is anchorSnap × snapMul = 1.8 m, and this test is about the grid.
   reset();
-  put(26, 4, 29, 4);                               // a horizontal beam at y = 4
-  eq(design.members.length, 1, 'setup: one horizontal beam for the tap tests');
   {
-    const id = design.members[0].id;
-    const f0 = fingerAt(27.5, 4);                  // finger ON the beam
-    tdown(f0);
-    tmove({ ...f0, px: f0.px + 10 });              // wiggle, under startCommitPx
-    ok(B.ghost === null, 'no ghost appears while the gesture is still aiming');
-    eq(B.touchAim.aiming, true, 'a wiggle under startCommitPx does not lock the start');
-    tup({ ...f0, px: f0.px + 10 });
-    eq(builder.getSelection(), id, 'down + wiggle + up selects the member under the RAW finger');
-    eq(design.members.length, 1, 'a tap places nothing');
-    ok(hitTestMember(f0.x, f0.y - OFF / Z, design, hitTol(Z)) === null,
-      'and the cursor was NOT over the member: the tap used the fingertip');
+    tap(26.2, 6.1);                                // head at (26, 6)
+    near(B.chainHead.x, 26, 1e-9, 'setup: head on the grid, clear of the anchors');
+    tdown(at(26.2, 6.1));
+    tmove(at(28.4, 6.1));                          // adjust…
+    ok(B.ghost !== null, 'sliding shows a live preview beam');
+    near(B.ghost.x1, 28.5, 1e-9, 'whose end follows the snapped fingertip');
+    tmove(at(27.4, 7.4));                          // …adjust again
+    near(B.ghost.x1, 27.5, 1e-9, 'and re-snaps as the finger keeps moving (x)');
+    near(B.ghost.y1, 7.5, 1e-9, '… and y');
+    eq(design.members.length, 0, 'nothing is committed mid-gesture');
+    tup(at(27.4, 7.4));
+    eq(design.members.length, 1, 'the lift commits');
+    ok(!!nodeAt(27.5, 7.5), 'at the SNAPPED LIFT position, not where the press started');
+    ok(!nodeAt(28.5, 6), 'and not at any position it merely passed through');
   }
+
+  // ---- C. starting a chain from existing work -----------------------------
+  reset();
+  put(26, 3, 26, 7);                               // a mouse-built upright
+  eq(design.members.length, 1, 'setup: one mouse-built beam');
+  eq(B.chainHead, null, 'a mouse placement never arms a touch chain');
+  {
+    // …from an ANCHOR: press on it, slide, lift
+    slide(29, 3, 29, 6.5);
+    eq(design.members.length, 2, 'a press on an anchor draws a beam from it');
+    const anchored = design.nodes.find((n) => n.anchorId === 'a1');
+    ok(!!anchored, 'the anchored endpoint carries the anchor id');
+    near(anchored.y, 3, 1e-9, 'and sits on the anchor, at the fingertip, unoffset');
+    eq(B.chainHead.nodeId, nodeAt(29, 6.5).id, 'the far end became the chain head');
+  }
+  {
+    // …from an existing NODE, with no chain running
+    emit('ui:tool', { id: 'erase' });               // ends the chain
+    emit('ui:tool', { id: 'build' });
+    eq(B.chainHead, null, 'setup: no chain head');
+    const before = design.nodes.length;
+    slide(26, 7, 27.5, 8.5);
+    eq(design.members.length, 3, 'a press on a node draws a beam FROM that node');
+    eq(design.nodes.length, before + 1, 'reusing the node instead of duplicating it');
+    ok(!!nodeAt(27.5, 8.5), 'and ending at the snapped lift position');
+  }
+  {
+    // …by TAPPING an existing node: it just becomes the head
+    emit('ui:tool', { id: 'erase' });
+    emit('ui:tool', { id: 'build' });
+    const n = nodeAt(26, 3);
+    const before = design.members.length;
+    tap(26, 3);
+    eq(design.members.length, before, 'a tap on an existing joint builds nothing');
+    ok(!!B.chainHead && B.chainHead.nodeId === n.id, 'it adopts the joint as the chain head');
+    eq(B.chainHead.pending, false, 'a real node, not a pending point');
+  }
+
+  // ---- D. ending a chain --------------------------------------------------
+  reset();
+  {
+    tap(26.2, 4.1); tap(26.2, 6.1);                // head at (26, 6)
+    eq(design.members.length, 1, 'setup: one beam, chain live');
+    const head = B.chainHead;
+    tap(26.1, 6.05);                               // tap the head itself
+    eq(B.chainHead, null, 'a tap ON the chain head finishes the run');
+    eq(design.members.length, 1, 'and builds nothing');
+    eq(design.nodes.length, 2, 'and leaves no stray node');
+    ok(head !== null, 'setup sanity: there had been a head to tap');
+  }
+  {
+    tap(28.2, 4.1);
+    ok(!!B.chainHead, 'setup: a fresh chain head');
+    emit('ui:tool', { id: 'erase' });
+    eq(B.chainHead, null, 'switching tools ends the chain');
+    emit('ui:tool', { id: 'build' });
+
+    tap(28.2, 4.1);
+    ok(!!B.chainHead, 'setup: another chain head');
+    emit('ui:material', { id: 'steel' });
+    ok(!!B.chainHead, 'picking a material does NOT end it (still building)');
+    emit('ui:material', { id: 'timber' });
+
+    emit('ui:tool', { id: 'build' });
+    eq(B.chainHead, null, 'pressing the BUILD button ends it too (the escape hatch)');
+    eq(B.tool, 'build', 'and leaves the build tool armed');
+
+    emit('phase:change', { phase: 'sim' });
+    eq(B.chainHead, null, 'leaving the build phase ends the chain');
+    S.phase = 'build';
+  }
+  {
+    const members = design.members.length, nodes = design.nodes.length;
+    tap(30.2, 6.1);
+    const head = B.chainHead;
+    slide(30.2, 6.1, 30.2, 8.1, true);             // pinch-cancel
+    eq(design.members.length, members, 'a pinch-cancelled press commits nothing');
+    eq(design.nodes.length, nodes, 'and creates no node');
+    eq(B.ghost, null, 'and clears the preview');
+    ok(B.chainHead === head, 'and the chain survives it, unchanged');
+  }
+
+  // ---- E. an invalid lift refuses, hints, and keeps the chain -------------
+  reset();
+  {
+    tap(26.2, 6.1);                                // head at (26, 6)
+    const head = B.chainHead;
+    tap(33.4, 6.1);                                // 7.5 m of timber: too long
+    eq(design.members.length, 0, 'an over-length lift places nothing');
+    eq(builder.getHint(), 'too long', 'and says why');
+    ok(B.chainHead === head, 'and the chain head is exactly where it was');
+
+    tap(23.4, 6);                                  // outside the 24..34 zone
+    eq(design.members.length, 0, 'a lift outside the build zone places nothing');
+    eq(builder.getHint(), 'outside build zone', 'and says that instead');
+    ok(B.chainHead === head, 'the chain still survives');
+
+    tap(28.2, 6.1);                                // …and a legal one still works
+    eq(design.members.length, 1, 'a legal lift right after a refusal still builds');
+    ok(!!nodeAt(28, 6), 'at the point it was aimed at');
+  }
+
+  // ---- F. touch snapping is STRONGER than mouse snapping ------------------
+  reset();
+  put(28, 6, 28, 3);                               // free node at (28, 6)
+  {
+    const target = nodeAt(28, 6);
+    ok(!!target, 'setup: a free node at (28, 6)');
+    ok(B.chainNodeId !== target.id, 'setup: it is not the chain node (no radius bonus)');
+    near(CONFIG.build.nodeSnap * T.snapMul, 1.2, 1e-9,
+      `setup: touch node radius is ${CONFIG.build.nodeSnap} × ${T.snapMul} m`);
+
+    tdown(at(29, 6));                              // exactly 1.0 m away
+    eq(B.hover.snap.kind, 'node', 'a touch press 1.0 m from a node snaps ONTO it');
+    eq(B.hover.snap.nodeId, target.id, 'and names that node');
+    tup(at(29, 6));
+
+    emit('input:down', { ...at(29, 6), id: 1, button: 0, cancel: false });
+    eq(B.drag.start.kind, 'grid', 'a MOUSE press at the same point stays on the grid');
+    emit('input:up', { ...at(29, 6), id: 1, button: 0, cancel: false });
+
+    near(CONFIG.build.gridSnap, 0.5, 1e-9, 'and the grid itself is untouched by snapMul');
+  }
+
+  // ---- G. the build tool never selects on touch --------------------------
+  reset();
+  put(26, 4, 29, 4);
   {
     builder.getBuilder().selection = null;
-    const f = fingerAt(27.5, 4);
-    tdown(f);
-    await new Promise((r) => setTimeout(r, CONFIG.build.tapMaxMs + 60));
-    tup(f);
-    eq(builder.getSelection(), design.members[0].id,
-      'aiming has no time limit: a slow, careful tap still selects');
-  }
-  {
-    const f = fingerAt(34.5, 11);                  // empty sky
-    tdown(f); tup(f);
-    eq(builder.getSelection(), null, 'a tap on empty space clears the selection');
+    eq(design.members.length, 1, 'setup: one beam to (not) select');
+    tap(27.5, 4.2);
+    eq(builder.getSelection(), null, 'a touch press on a beam selects nothing');
+    ok(!!B.chainHead, 'it is a placement gesture like any other');
+    // the mouse still selects, exactly as before
+    B.chainHead = null;
+    emit('input:down', { ...at(27.5, 4.2), id: 1, button: 0, cancel: false });
+    emit('input:up', { ...at(27.5, 4.2), id: 1, button: 0, cancel: false });
+    eq(builder.getSelection(), design.members[0].id, 'a MOUSE tap still selects it');
   }
 
-  // ---- C. the provisional start re-snaps while aiming ----------------------
-  reset();
-  {
-    const a = aimAt(27.4, 5.4);
-    tdown(a);
-    near(B.hover.snap.x, 27.5, 1e-9, 'the provisional start snaps to the grid under the cursor');
-    near(B.hover.snap.y, 5.5, 1e-9, '… on both axes');
-    const b = aimAt(27.1, 5.1);                    // 5.9 px of cursor travel
-    tmove(b);
-    ok(Math.hypot(b.px - a.px, b.py - a.py) < T.startCommitPx,
-      'setup: that slide is under the commit threshold');
-    near(B.hover.snap.x, 27, 1e-9, 'the start re-snapped to the new grid point');
-    near(B.hover.snap.y, 5, 1e-9, '… on both axes');
-    eq(B.touchAim.aiming, true, 'and the gesture is still aiming');
-    tup(b);
-    eq(design.members.length, 0, 'a re-snapped aim that never pulled places nothing');
-  }
-
-  // ---- D. the pull locks the start at the SNAPPED CURSOR -------------------
-  reset();
-  {
-    const a = aimAt(26, 3.1);                      // cursor over anchor a0
-    tdown(a);
-    tmove(aimAt(26.1, 3.05));                      // fine-position: still aiming
-    eq(B.touchAim.aiming, true, 'setup: fine-positioning has not committed');
-    const b = aimAt(26, 7);                        // pull: 3.9 m ≈ 55 px
-    tmove(b);
-    eq(B.touchAim.aiming, false, 'past startCommitPx the start LOCKS');
-    ok(B.ghost !== null, 'the ghost appears the moment the start locks');
-    near(B.ghost.x0, 26, 1e-9, 'the locked start is the anchor the cursor was over (x)');
-    near(B.ghost.y0, 3, 1e-9, 'the locked start is the anchor the cursor was over (y)');
-    eq(B.ghost.start.anchorId, 'a0', 'and it is the ANCHOR, not a bare grid point');
-    near(B.ghost.x1, 26, 1e-9, 'the ghost end follows the cursor (x)');
-    near(B.ghost.y1, 7, 1e-9, 'the ghost end follows the cursor, not the finger (y)');
-    ok(Math.abs(B.ghost.y0 - a.y) > 3, 'the start is nowhere near the raw fingertip');
-    tup(b);
-    eq(design.members.length, 1, 'release places the beam');
-    eq(design.nodes.length, 2, 'with both endpoints created');
-    const ys = design.nodes.map((n) => n.y).sort((m, n) => m - n);
-    near(ys[0], 3, 1e-9, 'the placed beam starts at the aimed anchor, not 4 m below it');
-    near(ys[1], 7, 1e-9, 'and ends at the cursor');
-    eq(design.nodes.find((n) => n.y === 3).anchorId, 'a0', 'the anchored endpoint kept its anchor');
-  }
-
-  // ---- E. chaining works, measured at the cursor ---------------------------
-  {
-    const chainId = B.chainNodeId;
-    ok(!!chainId, 'setup: the placement armed a chain node');
-    const a = aimAt(26.9, 7);                      // 0.9 m out: chain radius only
-    tdown(a);
-    eq(B.hover.snap.nodeId, chainId, 'a new touch near the fresh endpoint chains from it');
-    eq(B.touchAim.kind, 'node', 'and the cursor reports a node snap');
-    const b = aimAt(29, 7);
-    tmove(b);
-    tup(b);
-    eq(design.members.length, 2, 'the chained beam is placed');
-    eq(design.nodes.length, 3, 'and shares the endpoint instead of duplicating it');
-  }
-
-  // ---- E2. the commit threshold never outgrows the material ---------------
-  // A phone fits a whole valley at ~7 px/m, where startCommitPx is 3.7 m of
-  // world travel — further than concrete is ALLOWED to span. Uncapped, that
-  // makes concrete unplaceable by touch at the default framing.
-  reset();
-  {
-    const mainCam = S.camera;
-    const FAR = 7;
-    S.camera = {
-      zoom: FAR,
-      screenToWorld: (px, py) => [(px - W / 2) / FAR + CX, (H / 2 - py) / FAR + CY],
-    };
-    const far = (x, y) => {
-      const px = (x - CX) * FAR + W / 2, py = H / 2 - (y - CY) * FAR + OFF;
-      const [wx, wy] = S.camera.screenToWorld(px, py);
-      return { x: wx, y: wy, px, py };
-    };
-    emit('ui:material', { id: 'concrete' });
-    ok(MATERIALS.concrete.maxLength * FAR < T.startCommitPx,
-      'setup: at 7 px/m a legal concrete beam is shorter than startCommitPx');
-    const a = far(29, 4);
-    tdown(a);
-    // 11 px of pull: over the capped threshold (10.5) and — deliberately —
-    // UNDER the mouse's tapMaxPx, which a committed touch drag must ignore
-    const b = { ...a, py: a.py - 11 };
-    const [bwx, bwy] = S.camera.screenToWorld(b.px, b.py);
-    b.x = bwx; b.y = bwy;
-    ok(11 < CONFIG.build.tapMaxPx, 'setup: that pull is shorter than tapMaxPx');
-    tmove(b);
-    eq(B.touchAim.aiming, false, 'the commit threshold is capped by the material span');
-    tup(b);
-    eq(design.members.length, 1, 'so concrete is still placeable at a phone zoom');
-    near(builder.designCost(design), 1.5 * MATERIALS.concrete.costPerMeter, 1e-6,
-      'and a locked gesture places even when the mouse would have called it a tap');
-    emit('ui:material', { id: 'timber' });
-    S.camera = mainCam;
-  }
-
-  // ---- F. the offset shrinks near the top edge (and never jumps) ----------
-  reset();
-  {
-    const probe = (py) => {
-      const f = { px: 250, py, x: 0, y: 0 };
-      const [wx, wy] = S.camera.screenToWorld(f.px, f.py);
-      f.x = wx; f.y = wy;
-      tdown(f);
-      const cy = B.touchAim.py;
-      tup(f, true);
-      return cy;
-    };
-    near(probe(600), 600 - OFF, 1e-9, 'far from the top the cursor gets the full offset');
-    near(probe(T.topClearancePx + OFF), T.topClearancePx, 1e-9,
-      'the offset shrinks so the cursor stops exactly at topClearancePx');
-    near(probe(T.topClearancePx + 20), T.topClearancePx, 1e-9,
-      'closer still, the cursor is pinned to the clearance line');
-    near(probe(60), 60, 1e-9,
-      'a finger already above the clearance line keeps the cursor on the fingertip');
-
-    let below = 0, above = 0, jump = 0, prevF = null, prevC = null;
-    for (let py = 400; py >= 20; py -= 7) {
-      const c = probe(py);
-      if (c < Math.min(py, T.topClearancePx) - 1e-9) below++;
-      if (c > py + 1e-9) above++;
-      if (prevF !== null && Math.abs(c - prevC) > Math.abs(py - prevF) + 1e-9) jump++;
-      prevF = py; prevC = c;
-    }
-    eq(below, 0, 'the cursor never rises past the clearance line (55 sample heights)');
-    eq(above, 0, 'and never falls below the fingertip');
-    eq(jump, 0, 'the shrink is smooth: the cursor never moves further than the finger');
-  }
-
-  // ---- G. erase and box-delete stay on the RAW fingertip -------------------
+  // ---- H. erase and box-delete keep the raw fingertip --------------------
   reset();
   put(26, 4, 29, 4);
   eq(design.members.length, 1, 'setup: one beam to delete');
   {
     emit('ui:tool', { id: 'erase' });
-    const f = fingerAt(27.5, 4);
-    tdown(f);
-    eq(B.touchAim, null, 'the erase tool publishes no aim cursor');
-    tup(f);
+    tap(27.5, 4);
     eq(design.members.length, 0, 'a touch erase deletes what the FINGER is on');
     builder.undo();
     eq(design.members.length, 1, 'setup: the beam is back');
@@ -1284,80 +1280,359 @@ section('10. TOUCH AIMING v2 — OFFSET CURSOR + DEFERRED START');
   }
   {
     emit('ui:tool', { id: 'boxdelete' });
-    const a = fingerAt(25, 3.5), b = fingerAt(30, 4.5);
-    tdown(a);
-    tmove(b);
-    eq(B.touchAim, null, 'the box-delete tool publishes no aim cursor either');
+    tdown(at(25, 3.5));
+    tmove(at(30, 4.5));
     ok(B.marquee !== null, 'setup: the marquee is live');
-    near(B.marquee.y0, 3.5, 1e-9, 'the marquee is built from raw finger coords (y0)');
-    near(B.marquee.y1, 4.5, 1e-9, 'the marquee is built from raw finger coords (y1)');
-    tup(b);
-    eq(design.members.length, 0, 'and the box deletes the beam it was actually drawn around');
+    near(B.marquee.y0, 3.5, 1e-9, 'built from raw finger coords (y0)');
+    near(B.marquee.y1, 4.5, 1e-9, '… and y1');
+    tup(at(30, 4.5));
+    eq(design.members.length, 0, 'and the box deletes what it was drawn around');
     emit('ui:tool', { id: 'build' });
   }
 
-  // ---- H. pinch-cancel from both states ------------------------------------
+  // ---- I. mouse and pen are untouched -------------------------------------
   reset();
   {
-    const a = aimAt(26, 3);
-    tdown(a);
-    tmove(aimAt(26.05, 3.05));
-    eq(B.touchAim.aiming, true, 'setup: cancelling from the aiming state');
-    tup(aimAt(26.05, 3.05), true);
-    eq(design.members.length, 0, 'a pinch-cancel while aiming places nothing');
-    eq(design.nodes.length, 0, 'and leaves no orphan node');
-    eq(builder.getSelection(), null, 'and is not treated as a tap');
-    eq(B.touchAim, null, 'and clears the aim cursor');
-  }
-  {
-    const a = aimAt(26, 3);
-    tdown(a);
-    const b = aimAt(26, 7);
-    tmove(b);
-    eq(B.touchAim.aiming, false, 'setup: cancelling from the drawing state');
-    tup(b, true);
-    eq(design.members.length, 0, 'a pinch-cancel while drawing places nothing');
-    eq(design.nodes.length, 0, 'and leaves no orphan node');
-    eq(B.ghost, null, 'and clears the ghost');
-    eq(B.touchAim, null, 'and clears the aim cursor');
-  }
-
-  // ---- I. mouse and pen are untouched --------------------------------------
-  reset();
-  {
-    const a = fingerAt(26, 3), b = fingerAt(26, 7);
-    emit('input:down', { ...a, id: 1, button: 0, cancel: false });
-    eq(B.touchAim, null, 'a mouse gesture never publishes an aim cursor');
-    emit('input:move', { ...b, id: 1, button: 0, cancel: false, hover: false });
-    eq(B.touchAim, null, 'nor on move');
+    emit('input:down', { ...at(26, 3), id: 1, button: 0, cancel: false });
+    emit('input:move', { ...at(26, 7), id: 1, button: 0, cancel: false, hover: false });
     ok(B.ghost !== null, 'a mouse drag draws its ghost from the very first move');
     near(B.ghost.y0, 3, 1e-9, 'the mouse start is committed at pointer-down, unchanged');
-    emit('input:up', { ...b, id: 1, button: 0, cancel: false });
+    emit('input:up', { ...at(26, 7), id: 1, button: 0, cancel: false });
     eq(design.members.length, 1, 'the mouse places on release exactly as before');
-    near(design.nodes.find((n) => n.anchorId === 'a0').y, 3, 1e-9,
-      'and at the raw pointer position');
+    near(design.nodes.find((n) => n.anchorId === 'a0').y, 3, 1e-9, 'at the raw pointer position');
+    eq(B.chainHead, null, 'and arms no chain (a mouse-only session never sees one)');
   }
   reset();
   {
     put(26, 3, 26, 7, 'pen');
     eq(design.members.length, 1, 'a pen drag places a beam');
-    eq(B.touchAim, null, 'and pen gets no aim cursor (it points at what it touches)');
+    eq(B.chainHead, null, 'and gets no chain either (it points at what it touches)');
     const ys = design.nodes.map((n) => n.y).sort((m, n) => m - n);
     near(ys[0], 3, 1e-9, 'a pen beam starts at the raw pen position');
-    near(ys[1], 7, 1e-9, 'and ends there too — no offset for pen');
+    near(ys[1], 7, 1e-9, 'and ends there too');
   }
   reset();
 }
 
-// ------------------------------------------------ 11. TOUCH GESTURE FUZZ ----
-// Section 9 fuzzes the mouse editing surface. This one interleaves the three
-// touch gestures — aim → wiggle → pull → place, aim → tap, aim → pinch-cancel —
-// with the mouse actions, the delete tools and undo/redo, and holds the same
-// seven structural invariants plus an eighth: the aim cursor is a property of a
-// LIVE gesture and must never outlive one.
+// --------------------------------------------------- 11. NODE DRAGGING ------
+// Press-and-HOLD on an existing design node (CONFIG.touch.holdMs, travel under
+// holdSlopPx) LIFTS it: it follows the snapped pointer, every attached member
+// follows live with validity checking, and the release either commits the move
+// as ONE undo step or reverts the whole thing. Mouse and touch both.
 
-section('11. FUZZ — TOUCH GESTURES');
+section('11. NODE DRAGGING — HOLD TO LIFT');
 {
+  const T = CONFIG.touch;
+  const S = getScene();
+  const design = emptyDesign();
+  const L = level();
+  S.phase = 'build'; S.level = L; S.terrain = TERRAIN; S.design = design;
+  S.structure = null; S.water = null; S.simTime = 0;
+
+  const Z = 14, W = 500, H = 850, CX = 29, CY = 5;
+  S.camera = {
+    zoom: Z,
+    screenToWorld: (px, py) => [(px - W / 2) / Z + CX, (H / 2 - py) / Z + CY],
+  };
+  const sx = (x) => (x - CX) * Z + W / 2;
+  const sy = (y) => H / 2 - (y - CY) * Z;
+  const at = (x, y) => ({ x, y, px: sx(x), py: sy(y) });
+  const B = builder.getBuilder();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const HOLD = T.holdMs + 30;
+
+  const down = (f, ptype) => emit('input:down', { ...f, id: 1, button: 0, cancel: false, ptype });
+  const move = (f, ptype) => emit('input:move', { ...f, id: 1, button: 0, cancel: false, hover: false, ptype });
+  const up = (f, cancel, ptype) => emit('input:up', { ...f, id: 1, button: 0, cancel: !!cancel, ptype });
+  const put = (x0, y0, x1, y1) => {
+    down(at(x0, y0)); move(at(x1, y1)); up(at(x1, y1));
+  };
+  const nodeAt = (x, y) => design.nodes.find((n) =>
+    Math.abs(n.x - x) < 1e-6 && Math.abs(n.y - y) < 1e-6);
+  const memberLen = (m) => {
+    const a = design.nodes.find((n) => n.id === m.a), b = design.nodes.find((n) => n.id === m.b);
+    return Math.hypot(b.x - a.x, b.y - a.y);
+  };
+
+  // Two beams meeting at a free joint: dragging that joint has to move both.
+  const setup = () => {
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+    put(26, 3, 28, 6);        // anchor a0 → free joint
+    put(29, 3, 28, 6);        // anchor a1 → the same joint
+    emit('ui:tool', { id: 'erase' });    // clear any chain state
+    emit('ui:tool', { id: 'build' });
+  };
+
+  setup();
+  eq(design.members.length, 2, 'setup: two beams meeting at (28, 6)');
+  eq(design.nodes.length, 3, 'setup: three nodes');
+
+  // ---- A. a slide under the hold is NOT a lift ----------------------------
+  {
+    down(at(28, 6), 'touch');
+    move(at(28.9, 6), 'touch');                    // 12.6 px > holdSlopPx (10)
+    eq(B.nodeDrag, null, 'moving past holdSlopPx before holdMs is a slide, not a lift');
+    await sleep(HOLD);
+    move(at(30, 6), 'touch');
+    eq(B.nodeDrag, null, 'and waiting afterwards does not retro-lift it');
+    ok(B.ghost !== null, 'the gesture stayed a beam-drawing press');
+    up(at(30, 6), true, 'touch');                  // cancel: keep the fixture
+    eq(design.members.length, 2, 'setup intact');
+  }
+
+  // ---- B. holding still, then moving, LIFTS the node ---------------------
+  {
+    const n = nodeAt(28, 6);
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(28.2, 6.1), 'touch');                  // first move after the hold
+    ok(B.nodeDrag !== null, 'a press held past holdMs lifts the node it is on');
+    eq(B.nodeDrag.nodeId, n.id, 'the lifted node is the one under the finger');
+    eq(B.nodeDrag.touch, true, 'and it knows it is a touch drag (loupe + snapMul)');
+    eq(B.ghost, null, 'no beam ghost while a node is in the air');
+
+    const lens = design.members.map(memberLen);
+    move(at(28.4, 6.9), 'touch');                  // 4.7 m / 4.0 m: still legal
+    near(B.nodeDrag.x, 28.5, 1e-9, 'the lifted node follows the SNAPPED pointer (x)');
+    near(B.nodeDrag.y, 7, 1e-9, '… and y');
+    near(n.x, 28.5, 1e-9, 'the design node itself moves, so the members follow (x)');
+    near(n.y, 7, 1e-9, '… and y');
+    design.members.forEach((m, i) => {
+      ok(Math.abs(memberLen(m) - lens[i]) > 0.2,
+        'attached member ' + m.id + ' recomputed with the joint',
+        `${lens[i].toFixed(2)} → ${memberLen(m).toFixed(2)} m`);
+    });
+    eq(B.nodeDrag.ok, true, 'the drop is legal');
+
+    const undos = B.undo.length;
+    up(at(28.4, 6.9), false, 'touch');
+    eq(B.nodeDrag, null, 'the release clears the lift');
+    near(nodeAt(28.5, 7).x, 28.5, 1e-9, 'the node stays where it was dropped');
+    eq(B.undo.length, undos + 1, 'and the whole move is ONE undo step');
+    eq(design.members.length, 2, 'no member was harmed');
+
+    ok(builder.undo(), 'that step undoes');
+    ok(!!nodeAt(28, 6), 'the node is back where it started');
+    eq(design.members.length, 2, 'with both beams intact');
+    eq(design.nodes.length, 3, 'and no node lost or gained');
+  }
+
+  // ---- C. anchors gained and lost -----------------------------------------
+  // Its own fixture: one beam whose free end can actually REACH the anchor at
+  // (32, 3) without stretching the timber past its 5 m span.
+  {
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+    put(30, 6, 32, 6);
+    eq(design.members.length, 1, 'setup: one horizontal beam, both ends free');
+    eq(nodeAt(32, 6).anchorId, null, 'setup: the end to drag is unanchored');
+
+    down(at(32, 6), 'touch');
+    await sleep(HOLD);
+    move(at(31.9, 3.1), 'touch');                  // anchor a2 sits at (32, 3)
+    eq(B.nodeDrag.anchorId, 'a2', 'dropping a free node on an anchor claims it');
+    eq(B.nodeDrag.ok, true, 'and that drop is legal');
+    up(at(31.9, 3.1), false, 'touch');
+    const moved = nodeAt(32, 3);
+    ok(!!moved, 'the node snapped exactly onto the anchor');
+    eq(moved.anchorId, 'a2', 'and kept the anchor id after the commit');
+
+    down(at(32, 3), 'touch');
+    await sleep(HOLD);
+    move(at(30.4, 4.6), 'touch');
+    eq(B.nodeDrag.anchorId, null, 'dragging it back off the anchor drops the anchor id');
+    up(at(30.4, 4.6), false, 'touch');
+    const freed = nodeAt(30.5, 4.5);
+    ok(!!freed, 'the node committed at the grid point it was dropped on');
+    eq(freed.anchorId, null, 'as a free node again');
+  }
+
+  // ---- D. an illegal drop reverts, whole ----------------------------------
+  {
+    setup();
+    const n = nodeAt(28, 6);
+    const before = design.nodes.map((q) => ({ id: q.id, x: q.x, y: q.y, a: q.anchorId }));
+    const undos = B.undo.length;
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(33.5, 9), 'touch');                    // 7+ m from both anchors
+    eq(B.nodeDrag.ok, false, 'a drop that stretches timber past maxLength is refused');
+    eq(B.nodeDrag.reason, 'too long', 'and says why');
+    up(at(33.5, 9), false, 'touch');
+    eq(builder.getHint(), 'too long', 'the refusal reaches the HUD hint');
+    eq(B.undo.length, undos, 'an illegal move is not history');
+    for (const q of before) {
+      const live = design.nodes.find((z) => z.id === q.id);
+      ok(!!live && live.x === q.x && live.y === q.y && (live.anchorId || null) === q.a,
+        'node ' + q.id + ' is exactly where it was before the lift');
+    }
+  }
+  {
+    // outside the build zone is refused the same way
+    setup();
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(23.5, 5), 'touch');                    // zone is 24..34
+    eq(B.nodeDrag.ok, false, 'a drop outside the build zone is refused');
+    eq(B.nodeDrag.reason, 'outside build zone', 'with the zone reason');
+    up(at(23.5, 5), false, 'touch');
+    ok(!!nodeAt(28, 6), 'and the node goes home');
+  }
+  {
+    // …and so is a drop straight on top of another joint (the drag does not
+    // snap to nodes, so this is the one overlap it has to catch itself)
+    setup();
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(26, 3), 'touch');                      // the anchored node's spot
+    eq(B.nodeDrag.ok, false, 'a drop on top of another joint is refused');
+    eq(B.nodeDrag.reason, 'another joint there', 'and says so');
+    up(at(26, 3), false, 'touch');
+    ok(!!nodeAt(28, 6), 'the joint goes home');
+    eq(design.nodes.length, 3, 'and no coincident pair was created');
+  }
+  {
+    // Over budget from GROWN lengths. $190 buys the fixture with $18 to spare,
+    // and the move stretches both beams (steel is the expensive one) by $65 —
+    // while keeping every span well inside its material's limit, so the refusal
+    // can only be the budget.
+    const tight = level({ budget: 190 });
+    S.level = tight;
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(tight, TERRAIN, design);
+    put(26, 3, 28, 5);                             // 2.83 m timber = $42
+    eq(design.members.length, 1, 'setup: one cheap beam under a $190 budget');
+    emit('ui:material', { id: 'steel' });
+    put(29, 3, 28, 5);                             // 2.24 m steel = $130
+    eq(design.members.length, 2, 'setup: plus an expensive one');
+    emit('ui:material', { id: 'timber' });
+    ok(builder.budgetLeft() < 20, `setup: almost nothing left ($${builder.budgetLeft().toFixed(0)})`);
+    down(at(28, 5), 'touch');
+    await sleep(HOLD);
+    move(at(28.1, 5.9), 'touch');                  // grows both beams
+    eq(B.nodeDrag.ok, false, 'a move that grows the design past the budget is refused');
+    eq(B.nodeDrag.reason, 'over budget', 'and names the budget');
+    up(at(28.1, 5.9), false, 'touch');
+    ok(!!nodeAt(28, 5), 'the joint reverts');
+    ok(builder.designCost(design) <= tight.budget + CONFIG.build.budgetEps,
+      'and the design still fits the budget');
+    S.level = L;
+  }
+
+  // ---- E. interruptions never commit -------------------------------------
+  {
+    setup();
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(28.5, 7), 'touch');
+    ok(B.nodeDrag !== null, 'setup: a node is in the air');
+    up(at(28.5, 7), true, 'touch');                // pinch-cancel
+    eq(B.nodeDrag, null, 'a pinch-cancel ends the lift');
+    ok(!!nodeAt(28, 6), 'and puts the node back');
+
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(28.5, 7), 'touch');
+    emit('phase:change', { phase: 'sim' });
+    eq(B.nodeDrag, null, 'a phase change ends the lift');
+    ok(!!nodeAt(28, 6), 'and puts the node back');
+    S.phase = 'build';
+    up(at(28.5, 7), false, 'touch');
+    ok(!!nodeAt(28, 6), 'the stale release changes nothing');
+
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(28.5, 7), 'touch');
+    emit('ui:tool', { id: 'erase' });
+    eq(B.nodeDrag, null, 'switching tools ends the lift');
+    ok(!!nodeAt(28, 6), 'and puts the node back');
+    emit('ui:tool', { id: 'build' });
+    up(at(28.5, 7), false, 'touch');
+  }
+
+  // ---- F. the MOUSE lifts nodes too --------------------------------------
+  {
+    setup();
+    const n = nodeAt(28, 6);
+    emit('input:down', { ...at(28, 6), id: 1, button: 0, cancel: false });
+    await sleep(HOLD);
+    emit('input:move', { ...at(29, 7), id: 1, button: 0, cancel: false, hover: false });
+    ok(B.nodeDrag !== null, 'a mouse press held on a node lifts it as well');
+    eq(B.nodeDrag.touch, false, 'and knows it is not a touch drag');
+    near(B.nodeDrag.x, 29, 1e-9, 'it follows the snapped mouse');
+    emit('input:up', { ...at(29, 7), id: 1, button: 0, cancel: false });
+    ok(!!nodeAt(29, 7), 'and the mouse move commits');
+    ok(builder.undo() && !!nodeAt(28, 6), 'one undo brings it home');
+  }
+
+  // ---- G. the chain head follows the node it names -----------------------
+  {
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+    const tap = (x, y) => {
+      const f = at(x, y);
+      emit('input:down', { ...f, id: 1, button: 0, cancel: false, ptype: 'touch' });
+      emit('input:up', { ...f, id: 1, button: 0, cancel: false, ptype: 'touch' });
+    };
+    tap(26, 3); tap(26, 6);                        // beam a0 → (26, 6), head there
+    eq(design.members.length, 1, 'setup: a touch-built beam');
+    const head = B.chainHead;
+    eq(head.nodeId, nodeAt(26, 6).id, 'setup: the head is the free endpoint');
+
+    down(at(26, 6), 'touch');
+    await sleep(HOLD);
+    move(at(27, 6.5), 'touch');
+    eq(B.nodeDrag.nodeId, head.nodeId, 'holding the head lifts it like any node');
+    up(at(27, 6.5), false, 'touch');
+    near(B.chainHead.x, 27, 1e-9, 'after the move the head is where the node is (x)');
+    near(B.chainHead.y, 6.5, 1e-9, '… and y');
+    eq(B.chainHead.nodeId, head.nodeId, 'still naming the same node');
+
+    // a reverted move leaves the head where the node stayed
+    down(at(27, 6.5), 'touch');
+    await sleep(HOLD);
+    move(at(33.9, 9.4), 'touch');                  // too long
+    eq(B.nodeDrag.ok, false, 'setup: an illegal drop');
+    up(at(33.9, 9.4), false, 'touch');
+    near(B.chainHead.x, 27, 1e-9, 'a reverted move leaves the head with its node (x)');
+    near(B.chainHead.y, 6.5, 1e-9, '… and y');
+
+    // and a head whose node dies is dropped
+    builder.getBuilder().selection = design.members[0].id;
+    builder.deleteSelection();
+    eq(design.members.length, 0, 'setup: the beam is deleted');
+    eq(B.chainHead, null, 'a chain head whose node is gone is dropped');
+  }
+
+  // ---- H. a chain press on a node still draws a beam if it does not hold --
+  {
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+    put(26, 3, 26, 6);
+    emit('ui:tool', { id: 'erase' }); emit('ui:tool', { id: 'build' });
+    down(at(26, 6), 'touch');
+    move(at(28, 7), 'touch');                      // straight away: a slide
+    eq(B.nodeDrag, null, 'a press that slides immediately never lifts the node');
+    ok(B.ghost !== null, 'it draws a beam instead');
+    up(at(28, 7), false, 'touch');
+    eq(design.members.length, 2, 'and the lift places it');
+    ok(!!nodeAt(26, 6), 'the joint it started from did not move');
+  }
+}
+
+// ------------------------------------------------ 12. TOUCH GESTURE FUZZ ----
+// Section 9 fuzzes the mouse editing surface. This one interleaves the touch
+// vocabulary of v3 — press-adjust-lift chains, head taps, pinch-cancels and
+// held node drags (legal and illegal) — with the mouse actions, the delete
+// tools and undo/redo, and holds the same seven structural invariants plus
+// three about the new state: no preview outlives its gesture, the chain head is
+// always either null / pending / a live node, and no chain survives a phase
+// change.
+
+section('12. FUZZ — TOUCH GESTURES + NODE DRAGS');
+{
+  const T = CONFIG.touch;
   const S = getScene();
   const L = level({ budget: 2000 });
   const design = emptyDesign();
@@ -1372,14 +1647,9 @@ section('11. FUZZ — TOUCH GESTURES');
   };
   const sx = (x) => (x - CX) * Z + W / 2;
   const sy = (y) => H / 2 - (y - CY) * Z;
-  const OFF = CONFIG.touch.cursorOffsetPx;
-
   const at = (x, y) => ({ x, y, px: sx(x), py: sy(y) });
-  const aim = (x, y) => {                     // finger that puts the cursor on (x,y)
-    const px = sx(x), py = sy(y) + OFF;
-    const [wx, wy] = S.camera.screenToWorld(px, py);
-    return { x: wx, y: wy, px, py };
-  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
   const down = (f, button, ptype) =>
     emit('input:down', { ...f, id: 1, button: button || 0, cancel: false, ptype });
   const move = (f, ptype) =>
@@ -1405,13 +1675,16 @@ section('11. FUZZ — TOUCH GESTURES');
     'the design never costs more than the budget',
     'every node coordinate stays finite',
     'the marquee is null and empty whenever no drag is live',
-    'the aim cursor never outlives its gesture',
+    'no preview (drag, ghost, lifted node) outlives its gesture',
+    'the chain head is null, pending, or a live design node — always finite',
+    'no two nodes ever end up in the same place',
   ];
   const viol = INV.map(() => 0);
   const witness = INV.map(() => '');
 
   function check(where) {
     const nodeIds = new Set(design.nodes.map((n) => n.id));
+    const h = B.chainHead;
     const bad = [
       design.members.some((m) => !nodeIds.has(m.a) || !nodeIds.has(m.b)),
       design.nodes.some((n) => !design.members.some((m) => m.a === n.id || m.b === n.id)),
@@ -1421,23 +1694,28 @@ section('11. FUZZ — TOUCH GESTURES');
       builder.designCost(design) > L.budget + CONFIG.build.budgetEps,
       design.nodes.some((n) => !Number.isFinite(n.x) || !Number.isFinite(n.y)),
       !!B.marquee || B.marqueeHits.length > 0,
-      !!B.touchAim,
+      !!B.drag || !!B.ghost || !!B.nodeDrag,
+      !!h && (!Number.isFinite(h.x) || !Number.isFinite(h.y) ||
+        (h.pending ? !!h.nodeId : !nodeIds.has(h.nodeId))),
+      design.nodes.some((a, i) => design.nodes.some((b, j) =>
+        j > i && Math.hypot(a.x - b.x, a.y - b.y) <= CONFIG.build.mergeEps)),
     ];
     for (let i = 0; i < bad.length; i++) {
       if (bad[i]) { viol[i]++; if (!witness[i]) witness[i] = where; }
     }
   }
 
+  let touchPlaced = 0, mousePlaced = 0, deleted = 0, movedNodes = 0;
   let inTouch = false;
-  let touchPlaced = 0, mousePlaced = 0, deleted = 0;
   const offChange = on('design:change', (e) => {
+    if (e.action === 'move') { movedNodes++; return; }
     if (e.action !== 'place') { deleted += e.count || 1; return; }
     if (inTouch) touchPlaced++; else mousePlaced++;
   });
-  let touchTapSelects = 0, touchCancels = 0, locked = 0;
+  let headTaps = 0, chainsStarted = 0, lifts = 0, badDrops = 0, cancels = 0;
 
   const SEEDS = [3, 11, 2024, 65535];
-  const ACTIONS = 260;
+  const ACTIONS = 240;
   for (const seed of SEEDS) {
     const r = rng(seed);
     const X = () => 23 + r() * 12;              // straddles the 24..34 build zone
@@ -1450,40 +1728,53 @@ section('11. FUZZ — TOUCH GESTURES');
       const where = `seed ${seed} step ${step}`;
       inTouch = false;
 
-      if (pick < 0.30) {                        // TOUCH: aim → wiggle → pull → place
+      if (pick < 0.34) {                        // TOUCH: press · adjust · lift
         inTouch = true;
+        const had = !!B.chainHead;
         const x0 = X(), y0 = Y();
-        down(aim(x0, y0), 0, 'touch');
-        move(aim(x0 + (r() - 0.5) * 0.6, y0 + (r() - 0.5) * 0.6), 'touch');   // fine-position
-        const x1 = x0 + (r() - 0.5) * 8, y1 = y0 + (r() - 0.5) * 8;
-        move(aim(x1, y1), 'touch');
-        if (B.touchAim && B.touchAim.aiming === false) locked++;
-        const cancel = r() < 0.10;
-        if (cancel) touchCancels++;
-        up(aim(x1, y1), cancel, 0, 'touch');
-      } else if (pick < 0.42) {                 // TOUCH: aim → tap (never commits)
+        down(at(x0, y0), 0, 'touch');
+        if (r() < 0.6) move(at(x0 + (r() - 0.5) * 6, y0 + (r() - 0.5) * 6), 'touch');
+        const x1 = x0 + (r() - 0.5) * 5, y1 = y0 + (r() - 0.5) * 5;
+        if (r() < 0.5) move(at(x1, y1), 'touch');
+        const cancel = r() < 0.08;
+        if (cancel) cancels++;
+        up(at(x1, y1), cancel, 0, 'touch');
+        if (!had && B.chainHead) chainsStarted++;
+      } else if (pick < 0.44) {                 // TOUCH: tap exactly on the head
         inTouch = true;
-        const x = X(), y = Y();
-        const f = at(x, y);
+        const h = B.chainHead;
+        const f = h ? at(h.x, h.y) : at(X(), Y());
         down(f, 0, 'touch');
-        move({ ...f, px: f.px + (r() - 0.5) * 20 }, 'touch');
-        up({ ...f, px: f.px + (r() - 0.5) * 20 }, false, 0, 'touch');
-        if (B.selection) touchTapSelects++;
-      } else if (pick < 0.48) {                 // TOUCH: aim → pinch-cancel
+        up(f, false, 0, 'touch');
+        if (h && !B.chainHead) headTaps++;
+      } else if (pick < 0.47) {                 // TOUCH: held NODE DRAG
+                                                // (rarer than the rest on
+                                                // purpose: each one has to wait
+                                                // out a real holdMs, and the
+                                                // hold has its own section)
         inTouch = true;
-        const x = X(), y = Y();
-        down(aim(x, y), 0, 'touch');
-        if (r() < 0.5) move(aim(x + (r() - 0.5) * 8, y + (r() - 0.5) * 8), 'touch');
-        up(aim(X(), Y()), true, 0, 'touch');
-        touchCancels++;
-      } else if (pick < 0.54) {                 // TOUCH gesture cut short mid-drag
+        const nodes = design.nodes;
+        if (nodes.length) {
+          const n = nodes[Math.floor(r() * nodes.length)];
+          down(at(n.x, n.y), 0, 'touch');
+          await sleep(T.holdMs + 12);
+          move(at(n.x + (r() - 0.5) * 8, n.y + (r() - 0.5) * 8), 'touch');
+          if (B.nodeDrag) {
+            lifts++;
+            if (!B.nodeDrag.ok) badDrops++;
+          }
+          const f = at(X(), Y());
+          const cancel = r() < 0.12;
+          if (cancel) cancels++;
+          up(f, cancel, 0, 'touch');
+        }
+      } else if (pick < 0.56) {                 // TOUCH gesture cut short mid-press
         inTouch = true;
-        const x = X(), y = Y();
-        down(aim(x, y), 0, 'touch');
-        move(aim(X(), Y()), 'touch');
+        down(at(X(), Y()), 0, 'touch');
+        move(at(X(), Y()), 'touch');
         emit('input:key', { key: r() < 0.5 ? 'Delete' : 'z' });
-        up(aim(X(), Y()), false, 0, 'touch');
-      } else if (pick < 0.62) {                 // mouse place (the untouched path)
+        up(at(X(), Y()), false, 0, 'touch');
+      } else if (pick < 0.64) {                 // mouse place (the untouched path)
         const x0 = X(), y0 = Y();
         down(at(x0, y0));
         move(at(x0 + (r() - 0.5) * 6, y0 + (r() - 0.5) * 6));
@@ -1527,6 +1818,12 @@ section('11. FUZZ — TOUCH GESTURES');
       check(where);
     }
 
+    // a phase change must strip every trace of a live gesture
+    emit('phase:change', { phase: 'sim' });
+    ok(B.chainHead === null && B.nodeDrag === null && B.drag === null && B.ghost === null,
+      `seed ${seed}: a phase change ends every gesture and the chain`);
+    S.phase = 'build';
+
     let guard = 0;
     while (builder.undo() && guard++ < 500) check(`seed ${seed} undo`);
     check(`seed ${seed} fully undone`);
@@ -1539,12 +1836,14 @@ section('11. FUZZ — TOUCH GESTURES');
     ok(viol[i] === 0, `touch fuzz invariant ${i + 1}: ${INV[i]}`,
       `${viol[i]} violations (first at ${witness[i]})`);
   }
-  ok(touchPlaced > 0 && locked > 0,
-    `touch gestures actually built things (${touchPlaced} placed after ${locked} start locks)`);
+  ok(touchPlaced > 0 && chainsStarted > 0,
+    `press-adjust-lift built things (${touchPlaced} beams over ${chainsStarted} chains started)`);
+  ok(headTaps > 0, `chains were finished by tapping the head (${headTaps} times)`);
   ok(mousePlaced > 0, `the mouse path still built things alongside them (${mousePlaced})`);
-  ok(touchTapSelects > 0, `aim-taps selected members (${touchTapSelects} times)`);
-  ok(touchCancels > 0 && deleted > 0,
-    `cancels and deletes were exercised too (${touchCancels} cancels, ${deleted} members deleted)`);
+  ok(lifts > 0 && movedNodes > 0 && badDrops > 0,
+    `nodes were dragged (${lifts} lifted, ${movedNodes} moves committed, ${badDrops} illegal drops)`);
+  ok(cancels > 0 && deleted > 0,
+    `cancels and deletes were exercised too (${cancels} cancels, ${deleted} members deleted)`);
 }
 
 // ---------------------------------------------------------------- summary --
