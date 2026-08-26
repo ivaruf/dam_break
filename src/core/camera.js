@@ -2,6 +2,7 @@
 
 export function createCamera(canvas) {
   const cam = {
+    canvas,                 // exposed so consumers (builder dpr) need no DOM lookup
     x: 30, y: 8, zoom: 14, // zoom = px per meter
     min: 3, max: 90,
     shakeX: 0, shakeY: 0, // effects.js may write these (px, decays there)

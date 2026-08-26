@@ -1025,6 +1025,528 @@ section('9. FUZZ — EDITING INVARIANTS');
     'the fuzz leaves a coherent history');
 }
 
+// ------------------------------------------- 10. TOUCH AIMING v2 (cursor) ---
+// A finger has no hover and no point: its first contact blindly commits the
+// beam start, under the one spot the player needs to see. Touch aiming v2 gives
+// a touch BUILD gesture an offset AIM CURSOR (CONFIG.touch.cursorOffsetPx above
+// the fingertip, everything snaps to it) and a DEFERRED START (provisional and
+// re-snapping until the cursor has travelled startCommitPx). Mouse, pen, and
+// the erase/box-delete tools keep the raw-fingertip behaviour exactly.
+//
+// These tests need a camera that really unprojects: sections 5–9 drive px/py as
+// -y·Z, which is fine for travel thresholds but meaningless as a screen
+// coordinate, and "56 px above the finger" only means something on a real one.
+
+section('10. TOUCH AIMING v2 — OFFSET CURSOR + DEFERRED START');
+{
+  const T = CONFIG.touch;
+  const S = getScene();
+  const design = emptyDesign();
+  const L = level();
+  S.phase = 'build'; S.level = L; S.terrain = TERRAIN; S.design = design;
+  S.structure = null; S.water = null; S.simTime = 0;
+
+  // phone-shaped canvas, dpr 1 (no DOM headless → CSS px == device px)
+  const Z = 14, W = 500, H = 850, CX = 29, CY = 5;
+  S.camera = {
+    zoom: Z,
+    screenToWorld: (px, py) => [(px - W / 2) / Z + CX, (H / 2 - py) / Z + CY],
+  };
+  const sx = (x) => (x - CX) * Z + W / 2;         // world → device px
+  const sy = (y) => H / 2 - (y - CY) * Z;
+  const OFF = T.cursorOffsetPx;
+  const B = builder.getBuilder();
+
+  // a finger that puts the CURSOR on world (x, y) …
+  const aimAt = (x, y) => {
+    const px = sx(x), py = sy(y) + OFF;
+    const [wx, wy] = S.camera.screenToWorld(px, py);
+    return { x: wx, y: wy, px, py };
+  };
+  // … and a finger that is itself on world (x, y)
+  const fingerAt = (x, y) => ({ x, y, px: sx(x), py: sy(y) });
+
+  const tdown = (f) => emit('input:down', { ...f, id: 1, button: 0, cancel: false, ptype: 'touch' });
+  const tmove = (f) => emit('input:move', { ...f, id: 1, button: 0, cancel: false, hover: false, ptype: 'touch' });
+  const tup = (f, cancel) => emit('input:up', { ...f, id: 1, button: 0, cancel: !!cancel, ptype: 'touch' });
+
+  // mouse/pen driver on the same camera (no ptype = mouse)
+  const put = (x0, y0, x1, y1, ptype) => {
+    const a = fingerAt(x0, y0), b = fingerAt(x1, y1);
+    emit('input:down', { ...a, id: 1, button: 0, cancel: false, ptype });
+    emit('input:move', { ...b, id: 1, button: 0, cancel: false, hover: false, ptype });
+    emit('input:up', { ...b, id: 1, button: 0, cancel: false, ptype });
+  };
+
+  const reset = () => {
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+  };
+
+  // ---- A. the cursor floats above the finger, and IT is what snaps ---------
+  reset();
+  {
+    const f = aimAt(26, 3);                        // anchor a0 sits at (26, 3)
+    tdown(f);
+    ok(B.touchAim !== null, 'a touch build gesture publishes B.touchAim on down');
+    eq(B.touchAim.aiming, true, 'the gesture opens in the aiming state');
+    near(B.touchAim.px, f.px, 1e-9, 'the cursor keeps the finger x');
+    near(B.touchAim.py, f.py - OFF, 1e-9, 'the cursor floats cursorOffsetPx ABOVE the finger');
+    ok(B.touchAim.py < f.py, 'the cursor is above the finger in screen space');
+    near(B.touchAim.x, 26, 1e-9, 'the cursor world x is where the player is aiming');
+    near(B.touchAim.y, 3, 1e-9, 'the cursor world y is where the player is aiming');
+    near(f.y, 3 - OFF / Z, 1e-9, 'the FINGER itself is a whole ' + (OFF / Z).toFixed(1) + ' m lower');
+    eq(B.touchAim.kind, 'anchor', 'touchAim reports the snap kind under the cursor');
+    ok(B.hover && B.hover.snap && B.hover.snap.anchorId === 'a0',
+      'the provisional start snapped to the anchor the CURSOR is over');
+    eq(snapPoint(f.x, f.y, design, TERRAIN).kind, 'grid',
+      'the raw fingertip is over nothing — the anchor was found by the cursor alone');
+    tup(f, true);                                  // discard
+    eq(B.touchAim, null, 'B.touchAim is cleared when the gesture ends');
+  }
+
+  // ---- B. release while aiming = TAP, at the RAW fingertip -----------------
+  reset();
+  put(26, 4, 29, 4);                               // a horizontal beam at y = 4
+  eq(design.members.length, 1, 'setup: one horizontal beam for the tap tests');
+  {
+    const id = design.members[0].id;
+    const f0 = fingerAt(27.5, 4);                  // finger ON the beam
+    tdown(f0);
+    tmove({ ...f0, px: f0.px + 10 });              // wiggle, under startCommitPx
+    ok(B.ghost === null, 'no ghost appears while the gesture is still aiming');
+    eq(B.touchAim.aiming, true, 'a wiggle under startCommitPx does not lock the start');
+    tup({ ...f0, px: f0.px + 10 });
+    eq(builder.getSelection(), id, 'down + wiggle + up selects the member under the RAW finger');
+    eq(design.members.length, 1, 'a tap places nothing');
+    ok(hitTestMember(f0.x, f0.y - OFF / Z, design, hitTol(Z)) === null,
+      'and the cursor was NOT over the member: the tap used the fingertip');
+  }
+  {
+    builder.getBuilder().selection = null;
+    const f = fingerAt(27.5, 4);
+    tdown(f);
+    await new Promise((r) => setTimeout(r, CONFIG.build.tapMaxMs + 60));
+    tup(f);
+    eq(builder.getSelection(), design.members[0].id,
+      'aiming has no time limit: a slow, careful tap still selects');
+  }
+  {
+    const f = fingerAt(34.5, 11);                  // empty sky
+    tdown(f); tup(f);
+    eq(builder.getSelection(), null, 'a tap on empty space clears the selection');
+  }
+
+  // ---- C. the provisional start re-snaps while aiming ----------------------
+  reset();
+  {
+    const a = aimAt(27.4, 5.4);
+    tdown(a);
+    near(B.hover.snap.x, 27.5, 1e-9, 'the provisional start snaps to the grid under the cursor');
+    near(B.hover.snap.y, 5.5, 1e-9, '… on both axes');
+    const b = aimAt(27.1, 5.1);                    // 5.9 px of cursor travel
+    tmove(b);
+    ok(Math.hypot(b.px - a.px, b.py - a.py) < T.startCommitPx,
+      'setup: that slide is under the commit threshold');
+    near(B.hover.snap.x, 27, 1e-9, 'the start re-snapped to the new grid point');
+    near(B.hover.snap.y, 5, 1e-9, '… on both axes');
+    eq(B.touchAim.aiming, true, 'and the gesture is still aiming');
+    tup(b);
+    eq(design.members.length, 0, 'a re-snapped aim that never pulled places nothing');
+  }
+
+  // ---- D. the pull locks the start at the SNAPPED CURSOR -------------------
+  reset();
+  {
+    const a = aimAt(26, 3.1);                      // cursor over anchor a0
+    tdown(a);
+    tmove(aimAt(26.1, 3.05));                      // fine-position: still aiming
+    eq(B.touchAim.aiming, true, 'setup: fine-positioning has not committed');
+    const b = aimAt(26, 7);                        // pull: 3.9 m ≈ 55 px
+    tmove(b);
+    eq(B.touchAim.aiming, false, 'past startCommitPx the start LOCKS');
+    ok(B.ghost !== null, 'the ghost appears the moment the start locks');
+    near(B.ghost.x0, 26, 1e-9, 'the locked start is the anchor the cursor was over (x)');
+    near(B.ghost.y0, 3, 1e-9, 'the locked start is the anchor the cursor was over (y)');
+    eq(B.ghost.start.anchorId, 'a0', 'and it is the ANCHOR, not a bare grid point');
+    near(B.ghost.x1, 26, 1e-9, 'the ghost end follows the cursor (x)');
+    near(B.ghost.y1, 7, 1e-9, 'the ghost end follows the cursor, not the finger (y)');
+    ok(Math.abs(B.ghost.y0 - a.y) > 3, 'the start is nowhere near the raw fingertip');
+    tup(b);
+    eq(design.members.length, 1, 'release places the beam');
+    eq(design.nodes.length, 2, 'with both endpoints created');
+    const ys = design.nodes.map((n) => n.y).sort((m, n) => m - n);
+    near(ys[0], 3, 1e-9, 'the placed beam starts at the aimed anchor, not 4 m below it');
+    near(ys[1], 7, 1e-9, 'and ends at the cursor');
+    eq(design.nodes.find((n) => n.y === 3).anchorId, 'a0', 'the anchored endpoint kept its anchor');
+  }
+
+  // ---- E. chaining works, measured at the cursor ---------------------------
+  {
+    const chainId = B.chainNodeId;
+    ok(!!chainId, 'setup: the placement armed a chain node');
+    const a = aimAt(26.9, 7);                      // 0.9 m out: chain radius only
+    tdown(a);
+    eq(B.hover.snap.nodeId, chainId, 'a new touch near the fresh endpoint chains from it');
+    eq(B.touchAim.kind, 'node', 'and the cursor reports a node snap');
+    const b = aimAt(29, 7);
+    tmove(b);
+    tup(b);
+    eq(design.members.length, 2, 'the chained beam is placed');
+    eq(design.nodes.length, 3, 'and shares the endpoint instead of duplicating it');
+  }
+
+  // ---- E2. the commit threshold never outgrows the material ---------------
+  // A phone fits a whole valley at ~7 px/m, where startCommitPx is 3.7 m of
+  // world travel — further than concrete is ALLOWED to span. Uncapped, that
+  // makes concrete unplaceable by touch at the default framing.
+  reset();
+  {
+    const mainCam = S.camera;
+    const FAR = 7;
+    S.camera = {
+      zoom: FAR,
+      screenToWorld: (px, py) => [(px - W / 2) / FAR + CX, (H / 2 - py) / FAR + CY],
+    };
+    const far = (x, y) => {
+      const px = (x - CX) * FAR + W / 2, py = H / 2 - (y - CY) * FAR + OFF;
+      const [wx, wy] = S.camera.screenToWorld(px, py);
+      return { x: wx, y: wy, px, py };
+    };
+    emit('ui:material', { id: 'concrete' });
+    ok(MATERIALS.concrete.maxLength * FAR < T.startCommitPx,
+      'setup: at 7 px/m a legal concrete beam is shorter than startCommitPx');
+    const a = far(29, 4);
+    tdown(a);
+    // 11 px of pull: over the capped threshold (10.5) and — deliberately —
+    // UNDER the mouse's tapMaxPx, which a committed touch drag must ignore
+    const b = { ...a, py: a.py - 11 };
+    const [bwx, bwy] = S.camera.screenToWorld(b.px, b.py);
+    b.x = bwx; b.y = bwy;
+    ok(11 < CONFIG.build.tapMaxPx, 'setup: that pull is shorter than tapMaxPx');
+    tmove(b);
+    eq(B.touchAim.aiming, false, 'the commit threshold is capped by the material span');
+    tup(b);
+    eq(design.members.length, 1, 'so concrete is still placeable at a phone zoom');
+    near(builder.designCost(design), 1.5 * MATERIALS.concrete.costPerMeter, 1e-6,
+      'and a locked gesture places even when the mouse would have called it a tap');
+    emit('ui:material', { id: 'timber' });
+    S.camera = mainCam;
+  }
+
+  // ---- F. the offset shrinks near the top edge (and never jumps) ----------
+  reset();
+  {
+    const probe = (py) => {
+      const f = { px: 250, py, x: 0, y: 0 };
+      const [wx, wy] = S.camera.screenToWorld(f.px, f.py);
+      f.x = wx; f.y = wy;
+      tdown(f);
+      const cy = B.touchAim.py;
+      tup(f, true);
+      return cy;
+    };
+    near(probe(600), 600 - OFF, 1e-9, 'far from the top the cursor gets the full offset');
+    near(probe(T.topClearancePx + OFF), T.topClearancePx, 1e-9,
+      'the offset shrinks so the cursor stops exactly at topClearancePx');
+    near(probe(T.topClearancePx + 20), T.topClearancePx, 1e-9,
+      'closer still, the cursor is pinned to the clearance line');
+    near(probe(60), 60, 1e-9,
+      'a finger already above the clearance line keeps the cursor on the fingertip');
+
+    let below = 0, above = 0, jump = 0, prevF = null, prevC = null;
+    for (let py = 400; py >= 20; py -= 7) {
+      const c = probe(py);
+      if (c < Math.min(py, T.topClearancePx) - 1e-9) below++;
+      if (c > py + 1e-9) above++;
+      if (prevF !== null && Math.abs(c - prevC) > Math.abs(py - prevF) + 1e-9) jump++;
+      prevF = py; prevC = c;
+    }
+    eq(below, 0, 'the cursor never rises past the clearance line (55 sample heights)');
+    eq(above, 0, 'and never falls below the fingertip');
+    eq(jump, 0, 'the shrink is smooth: the cursor never moves further than the finger');
+  }
+
+  // ---- G. erase and box-delete stay on the RAW fingertip -------------------
+  reset();
+  put(26, 4, 29, 4);
+  eq(design.members.length, 1, 'setup: one beam to delete');
+  {
+    emit('ui:tool', { id: 'erase' });
+    const f = fingerAt(27.5, 4);
+    tdown(f);
+    eq(B.touchAim, null, 'the erase tool publishes no aim cursor');
+    tup(f);
+    eq(design.members.length, 0, 'a touch erase deletes what the FINGER is on');
+    builder.undo();
+    eq(design.members.length, 1, 'setup: the beam is back');
+    emit('ui:tool', { id: 'build' });
+  }
+  {
+    emit('ui:tool', { id: 'boxdelete' });
+    const a = fingerAt(25, 3.5), b = fingerAt(30, 4.5);
+    tdown(a);
+    tmove(b);
+    eq(B.touchAim, null, 'the box-delete tool publishes no aim cursor either');
+    ok(B.marquee !== null, 'setup: the marquee is live');
+    near(B.marquee.y0, 3.5, 1e-9, 'the marquee is built from raw finger coords (y0)');
+    near(B.marquee.y1, 4.5, 1e-9, 'the marquee is built from raw finger coords (y1)');
+    tup(b);
+    eq(design.members.length, 0, 'and the box deletes the beam it was actually drawn around');
+    emit('ui:tool', { id: 'build' });
+  }
+
+  // ---- H. pinch-cancel from both states ------------------------------------
+  reset();
+  {
+    const a = aimAt(26, 3);
+    tdown(a);
+    tmove(aimAt(26.05, 3.05));
+    eq(B.touchAim.aiming, true, 'setup: cancelling from the aiming state');
+    tup(aimAt(26.05, 3.05), true);
+    eq(design.members.length, 0, 'a pinch-cancel while aiming places nothing');
+    eq(design.nodes.length, 0, 'and leaves no orphan node');
+    eq(builder.getSelection(), null, 'and is not treated as a tap');
+    eq(B.touchAim, null, 'and clears the aim cursor');
+  }
+  {
+    const a = aimAt(26, 3);
+    tdown(a);
+    const b = aimAt(26, 7);
+    tmove(b);
+    eq(B.touchAim.aiming, false, 'setup: cancelling from the drawing state');
+    tup(b, true);
+    eq(design.members.length, 0, 'a pinch-cancel while drawing places nothing');
+    eq(design.nodes.length, 0, 'and leaves no orphan node');
+    eq(B.ghost, null, 'and clears the ghost');
+    eq(B.touchAim, null, 'and clears the aim cursor');
+  }
+
+  // ---- I. mouse and pen are untouched --------------------------------------
+  reset();
+  {
+    const a = fingerAt(26, 3), b = fingerAt(26, 7);
+    emit('input:down', { ...a, id: 1, button: 0, cancel: false });
+    eq(B.touchAim, null, 'a mouse gesture never publishes an aim cursor');
+    emit('input:move', { ...b, id: 1, button: 0, cancel: false, hover: false });
+    eq(B.touchAim, null, 'nor on move');
+    ok(B.ghost !== null, 'a mouse drag draws its ghost from the very first move');
+    near(B.ghost.y0, 3, 1e-9, 'the mouse start is committed at pointer-down, unchanged');
+    emit('input:up', { ...b, id: 1, button: 0, cancel: false });
+    eq(design.members.length, 1, 'the mouse places on release exactly as before');
+    near(design.nodes.find((n) => n.anchorId === 'a0').y, 3, 1e-9,
+      'and at the raw pointer position');
+  }
+  reset();
+  {
+    put(26, 3, 26, 7, 'pen');
+    eq(design.members.length, 1, 'a pen drag places a beam');
+    eq(B.touchAim, null, 'and pen gets no aim cursor (it points at what it touches)');
+    const ys = design.nodes.map((n) => n.y).sort((m, n) => m - n);
+    near(ys[0], 3, 1e-9, 'a pen beam starts at the raw pen position');
+    near(ys[1], 7, 1e-9, 'and ends there too — no offset for pen');
+  }
+  reset();
+}
+
+// ------------------------------------------------ 11. TOUCH GESTURE FUZZ ----
+// Section 9 fuzzes the mouse editing surface. This one interleaves the three
+// touch gestures — aim → wiggle → pull → place, aim → tap, aim → pinch-cancel —
+// with the mouse actions, the delete tools and undo/redo, and holds the same
+// seven structural invariants plus an eighth: the aim cursor is a property of a
+// LIVE gesture and must never outlive one.
+
+section('11. FUZZ — TOUCH GESTURES');
+{
+  const S = getScene();
+  const L = level({ budget: 2000 });
+  const design = emptyDesign();
+  S.phase = 'build'; S.level = L; S.terrain = TERRAIN; S.design = design;
+  S.structure = null; S.water = null; S.simTime = 0;
+  const B = builder.getBuilder();
+
+  const Z = 14, W = 500, H = 850, CX = 29, CY = 5;
+  S.camera = {
+    zoom: Z,
+    screenToWorld: (px, py) => [(px - W / 2) / Z + CX, (H / 2 - py) / Z + CY],
+  };
+  const sx = (x) => (x - CX) * Z + W / 2;
+  const sy = (y) => H / 2 - (y - CY) * Z;
+  const OFF = CONFIG.touch.cursorOffsetPx;
+
+  const at = (x, y) => ({ x, y, px: sx(x), py: sy(y) });
+  const aim = (x, y) => {                     // finger that puts the cursor on (x,y)
+    const px = sx(x), py = sy(y) + OFF;
+    const [wx, wy] = S.camera.screenToWorld(px, py);
+    return { x: wx, y: wy, px, py };
+  };
+  const down = (f, button, ptype) =>
+    emit('input:down', { ...f, id: 1, button: button || 0, cancel: false, ptype });
+  const move = (f, ptype) =>
+    emit('input:move', { ...f, id: 1, button: 0, cancel: false, hover: false, ptype });
+  const up = (f, cancel, button, ptype) =>
+    emit('input:up', { ...f, id: 1, button: button || 0, cancel: !!cancel, ptype });
+
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const INV = [
+    'every member points at two live nodes',
+    'no orphan node survives a completed gesture',
+    'node and member ids stay unique',
+    'the selection is null or a live member',
+    'the design never costs more than the budget',
+    'every node coordinate stays finite',
+    'the marquee is null and empty whenever no drag is live',
+    'the aim cursor never outlives its gesture',
+  ];
+  const viol = INV.map(() => 0);
+  const witness = INV.map(() => '');
+
+  function check(where) {
+    const nodeIds = new Set(design.nodes.map((n) => n.id));
+    const bad = [
+      design.members.some((m) => !nodeIds.has(m.a) || !nodeIds.has(m.b)),
+      design.nodes.some((n) => !design.members.some((m) => m.a === n.id || m.b === n.id)),
+      nodeIds.size !== design.nodes.length ||
+        new Set(design.members.map((m) => m.id)).size !== design.members.length,
+      !!B.selection && !design.members.some((m) => m.id === B.selection),
+      builder.designCost(design) > L.budget + CONFIG.build.budgetEps,
+      design.nodes.some((n) => !Number.isFinite(n.x) || !Number.isFinite(n.y)),
+      !!B.marquee || B.marqueeHits.length > 0,
+      !!B.touchAim,
+    ];
+    for (let i = 0; i < bad.length; i++) {
+      if (bad[i]) { viol[i]++; if (!witness[i]) witness[i] = where; }
+    }
+  }
+
+  let inTouch = false;
+  let touchPlaced = 0, mousePlaced = 0, deleted = 0;
+  const offChange = on('design:change', (e) => {
+    if (e.action !== 'place') { deleted += e.count || 1; return; }
+    if (inTouch) touchPlaced++; else mousePlaced++;
+  });
+  let touchTapSelects = 0, touchCancels = 0, locked = 0;
+
+  const SEEDS = [3, 11, 2024, 65535];
+  const ACTIONS = 260;
+  for (const seed of SEEDS) {
+    const r = rng(seed);
+    const X = () => 23 + r() * 12;              // straddles the 24..34 build zone
+    const Y = () => 3 + r() * 6;
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+
+    for (let step = 0; step < ACTIONS; step++) {
+      const pick = r();
+      const where = `seed ${seed} step ${step}`;
+      inTouch = false;
+
+      if (pick < 0.30) {                        // TOUCH: aim → wiggle → pull → place
+        inTouch = true;
+        const x0 = X(), y0 = Y();
+        down(aim(x0, y0), 0, 'touch');
+        move(aim(x0 + (r() - 0.5) * 0.6, y0 + (r() - 0.5) * 0.6), 'touch');   // fine-position
+        const x1 = x0 + (r() - 0.5) * 8, y1 = y0 + (r() - 0.5) * 8;
+        move(aim(x1, y1), 'touch');
+        if (B.touchAim && B.touchAim.aiming === false) locked++;
+        const cancel = r() < 0.10;
+        if (cancel) touchCancels++;
+        up(aim(x1, y1), cancel, 0, 'touch');
+      } else if (pick < 0.42) {                 // TOUCH: aim → tap (never commits)
+        inTouch = true;
+        const x = X(), y = Y();
+        const f = at(x, y);
+        down(f, 0, 'touch');
+        move({ ...f, px: f.px + (r() - 0.5) * 20 }, 'touch');
+        up({ ...f, px: f.px + (r() - 0.5) * 20 }, false, 0, 'touch');
+        if (B.selection) touchTapSelects++;
+      } else if (pick < 0.48) {                 // TOUCH: aim → pinch-cancel
+        inTouch = true;
+        const x = X(), y = Y();
+        down(aim(x, y), 0, 'touch');
+        if (r() < 0.5) move(aim(x + (r() - 0.5) * 8, y + (r() - 0.5) * 8), 'touch');
+        up(aim(X(), Y()), true, 0, 'touch');
+        touchCancels++;
+      } else if (pick < 0.54) {                 // TOUCH gesture cut short mid-drag
+        inTouch = true;
+        const x = X(), y = Y();
+        down(aim(x, y), 0, 'touch');
+        move(aim(X(), Y()), 'touch');
+        emit('input:key', { key: r() < 0.5 ? 'Delete' : 'z' });
+        up(aim(X(), Y()), false, 0, 'touch');
+      } else if (pick < 0.62) {                 // mouse place (the untouched path)
+        const x0 = X(), y0 = Y();
+        down(at(x0, y0));
+        move(at(x0 + (r() - 0.5) * 6, y0 + (r() - 0.5) * 6));
+        const x1 = x0 + (r() - 0.5) * 6, y1 = y0 + (r() - 0.5) * 6;
+        move(at(x1, y1));
+        up(at(x1, y1), r() < 0.08);
+      } else if (pick < 0.70) {                 // box-delete drag, by touch
+        builder.setTool('boxdelete');
+        const x0 = X(), y0 = Y(), x1 = X(), y1 = Y();
+        down(at(x0, y0), 0, 'touch');
+        move(at((x0 + x1) / 2, (y0 + y1) / 2), 'touch');
+        move(at(x1, y1), 'touch');
+        up(at(x1, y1), r() < 0.15, 0, 'touch');
+        builder.setTool('build');
+      } else if (pick < 0.76) {                 // box-delete tap, by touch
+        builder.setTool('boxdelete');
+        const f = at(X(), Y());
+        down(f, 0, 'touch'); up(f, false, 0, 'touch');
+        builder.setTool('build');
+      } else if (pick < 0.82) {                 // eraser drag, by touch
+        builder.setTool('erase');
+        const f0 = at(X(), Y()), f1 = at(X(), Y());
+        down(f0, 0, 'touch'); move(f1, 'touch'); up(f1, false, 0, 'touch');
+        builder.setTool('build');
+      } else if (pick < 0.86) {                 // right-click delete (mouse only)
+        const f = at(X(), Y());
+        down(f, 2); up(f, false, 2);
+      } else if (pick < 0.90) {                 // key delete of the selection
+        emit('input:key', { key: r() < 0.5 ? 'Delete' : 'Backspace' });
+      } else if (pick < 0.96) {                 // undo / redo
+        emit('input:key', { key: r() < 0.6 ? 'z' : 'Z' });
+      } else if (pick < 0.98) {                 // clear everything
+        builder.clearDesign();
+      } else {                                  // tool / material churn
+        const keys = ['x', 'e', 'b', '1', '2', '3', '4'];
+        emit('input:key', { key: keys[Math.floor(r() * keys.length)] });
+        builder.setTool('build');
+      }
+
+      inTouch = false;
+      check(where);
+    }
+
+    let guard = 0;
+    while (builder.undo() && guard++ < 500) check(`seed ${seed} undo`);
+    check(`seed ${seed} fully undone`);
+    while (builder.redo() && guard++ < 1000) check(`seed ${seed} redo`);
+  }
+  offChange();
+  builder.setTool('build');
+
+  for (let i = 0; i < INV.length; i++) {
+    ok(viol[i] === 0, `touch fuzz invariant ${i + 1}: ${INV[i]}`,
+      `${viol[i]} violations (first at ${witness[i]})`);
+  }
+  ok(touchPlaced > 0 && locked > 0,
+    `touch gestures actually built things (${touchPlaced} placed after ${locked} start locks)`);
+  ok(mousePlaced > 0, `the mouse path still built things alongside them (${mousePlaced})`);
+  ok(touchTapSelects > 0, `aim-taps selected members (${touchTapSelects} times)`);
+  ok(touchCancels > 0 && deleted > 0,
+    `cancels and deletes were exercised too (${touchCancels} cancels, ${deleted} members deleted)`);
+}
+
 // ---------------------------------------------------------------- summary --
 
 console.log(`\n${pass} passed, ${fail} failed`);

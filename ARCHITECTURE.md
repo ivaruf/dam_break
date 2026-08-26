@@ -367,7 +367,17 @@ sizing (min 44px touch targets).
 - Snapping: existing nodes (r≈0.6 m), anchors (r≈0.9), grid 0.5 m; max/min member
   length by material; cost preview on ghost; invalid = red ghost (over budget,
   too long, outside buildZone, inside terrain).
-- Keys: 1–4 materials, Space release/pause, R retry, Delete remove selection.
+- Keys: 1–4 materials, Space release/pause, R retry, Delete remove selection,
+  X box-delete tool, E erase.
+- TOUCH AIMING (build tool, touch only): the active point is an OFFSET CURSOR
+  CONFIG.touch.cursorOffsetPx above the fingertip (shrinks smoothly within
+  topClearancePx of the top edge); pointer-down opens an AIMING state whose
+  provisional start re-snaps to the cursor until displacement exceeds
+  startCommitPx (capped at commitMaxFrac·maxLength in screen px), then the
+  start locks and the drag draws. Release while aiming = tap at the RAW
+  fingertip. Builder publishes getBuilder().touchAim = null | {x, y, px, py,
+  kind, aiming}; rendering/loupe.js draws the cursor + magnifier from it.
+  Erase/boxdelete stay on raw finger coords. Mouse/pen unchanged.
 - Budget: cost = Σ len·costPerMeter; builder refuses placement over budget.
 - modes.js runs objectives: track retention via `water.volumeBetween` +
   `stats.totalIn`, protect-zone depth via `depthAt`, survival timer, and emits

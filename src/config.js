@@ -813,7 +813,7 @@ export const CONFIG = {
   loupe: {
     radiusPx: 52,          // circle radius (CSS px)
     zoom: 2.2,             // magnification of the frame region
-    offsetPx: 88,          // finger -> loupe centre distance
+    offsetPx: 88,          // aim cursor -> loupe centre distance
     topClearancePx: 96,    // don't collide with the HUD top row
     ringPx: 3,
     ringOk: '#7fff9a',
@@ -822,6 +822,41 @@ export const CONFIG = {
     cross: 'rgba(230, 245, 255, 0.9)',
     crossPx: 10,
     backing: 'rgba(6, 12, 18, 0.7)',
+
+    // ---- the aim cursor itself, drawn on the MAIN canvas (touch aiming v2) --
+    // The loupe shows you the neighbourhood; this marks the exact point the
+    // beam will land on, in the frame, at the cursor. Ring size encodes the
+    // snap kind (a node is a bigger promise than a grid dot); ring COLOUR is
+    // the loupe's own ok/bad/neutral family, so one glance reads both.
+    cursorCrossPx: 9,      // crosshair arm length (CSS px)
+    cursorGapPx: 3,        // hole in the middle: never cover the snap point
+    cursorLinePx: 1.6,
+    cursorRingPx: { node: 9.5, anchor: 8, grid: 5.5 },
+    cursorRingLinePx: 2,
+    cursorAlpha: 0.95,
+  },
+
+  // ---- TOUCH AIMING v2 (Fable) ------------------------------------------
+  // A mouse hovers before it commits; a finger's first contact is blind, and
+  // it lands on the one spot the player needs to see. Two knobs fix that, and
+  // they apply to TOUCH + the BUILD tool only — mouse and pen are untouched,
+  // and erase/box-delete stay on the raw fingertip (see builder.js).
+  touch: {
+    cursorOffsetPx: 56,    // the active point floats this far ABOVE the
+                           // fingertip (CSS px). Everything snaps to the
+                           // CURSOR, so the finger never hides the target.
+    topClearancePx: 100,   // near the top edge the offset shrinks smoothly to
+                           // keep the cursor on canvas and clear of the HUD:
+                           // effOffset = min(cursorOffsetPx, fingerY − this).
+    startCommitPx: 26,     // cursor travel (CSS px, displacement from the
+                           // touch-down cursor) before the beam START locks.
+                           // Under it the gesture is still AIMING: the start
+                           // re-snaps to the cursor, and a release is a tap.
+    commitMaxFrac: 0.5,    // …but never more than this fraction of the
+                           // material's maxLength in screen px. A phone fits a
+                           // whole valley at ~7 px/m, where 26 px is 3.7 m —
+                           // longer than concrete may span. Inert at any zoom
+                           // where the grid is big enough to aim at.
   },
 
   levels: {
