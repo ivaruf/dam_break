@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.6.0'; // building v4: the reach circle — constraints as visible geometry
+const VERSION = 'v2.6.1'; // reach circle rim snap: max-length beams in one click, clean edge
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

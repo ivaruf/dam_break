@@ -1,6 +1,7 @@
 // OPUS B owns. Snapping, placement validity, hit tests. Contract §10. DOM-free.
 //
-// Priority for snapPoint(): existing design node > terrain anchor > grid.
+// Priority for snapPoint(): existing design node > terrain anchor > the armed
+// reach circle's rim (opts.rim — max-length beams in one click) > grid.
 // validate() is the single authority on "may this member exist" — the builder
 // never places anything it rejects, and the ghost shows its `reason` verbatim.
 //
@@ -106,13 +107,13 @@ export function memberLength(design, m, map) {
 
 // ---- snapping -------------------------------------------------------------
 
-// Returns {x, y, nodeId|null, anchorId|null, kind:'node'|'anchor'|'grid'}.
+// Returns {x, y, nodeId|null, anchorId|null, kind:'node'|'anchor'|'rim'|'grid'}.
 //
 // opts (all optional; omitting every one of them is the original mouse
 // behaviour, unchanged):
 //   chainNodeId  this node gets an enlarged radius, so chain-building off the
 //                endpoint you just placed is forgiving (CONFIG.build.chainSnapMul)
-//   radiusMul    multiplies the NODE and ANCHOR radii — CONFIG.touch.snapMul
+//   radiusMul    multiplies the NODE, ANCHOR and RIM radii — CONFIG.touch.snapMul
 //                for touch gestures, so the preview endpoint pops decisively
 //                onto a joint. The GRID is deliberately not scaled: it is a
 //                quantisation, not a target, and 0.5 m is 0.5 m on every input.
@@ -122,6 +123,15 @@ export function memberLength(design, m, map) {
 //   noNodes      skip design nodes entirely: anchors and the grid only. Dropping
 //                a dragged node exactly onto another one would make a coincident
 //                pair, not a joint.
+//   rim          {x, y, r} — the live reach circle. Its EDGE is a snap target
+//                like an anchor: a point within CONFIG.build.rimSnap of the rim
+//                (either side) lands ON it, at exactly maxLength from the armed
+//                start, so the longest beam a material has is one click. Nodes
+//                and anchors outrank it (a joint near the rim still means that
+//                joint); the grid must not — a grid point near the rim rounds
+//                PAST maxLength and refuses as 'too long', which is both a click
+//                the player did not mean and the fringe of dark slivers that
+//                used to fray the drawn circle's edge.
 export function snapPoint(x, y, design, terrain, opts) {
   const B = CONFIG.build;
   const o = opts || {};
@@ -168,7 +178,30 @@ export function snapPoint(x, y, design, terrain, opts) {
     };
   }
 
-  // 3. grid — but never invent a second node on top of an existing one
+  // 3. the reach circle's edge (see the opts doc above)
+  const rim = o.rim;
+  if (rim && rim.r > 0) {
+    const dx = x - rim.x, dy = y - rim.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 1e-9 && Math.abs(d - rim.r) <= B.rimSnap * mul) {
+      // a hair inside the exact radius, so the beam's own recomputed length can
+      // never drift a float ulp past maxLength and refuse as 'too long'
+      const s = (rim.r - 1e-6) / d;
+      const rx = rim.x + dx * s, ry = rim.y + dy * s;
+      // …but never invent a point on top of an existing node (same rule as grid)
+      if (design && !o.noNodes) {
+        for (const n of design.nodes) {
+          if (n.id === ignore) continue;
+          if (Math.abs(n.x - rx) <= B.mergeEps && Math.abs(n.y - ry) <= B.mergeEps) {
+            return { x: n.x, y: n.y, nodeId: n.id, anchorId: n.anchorId || null, kind: 'node' };
+          }
+        }
+      }
+      return { x: rx, y: ry, nodeId: null, anchorId: null, kind: 'rim' };
+    }
+  }
+
+  // 4. grid — but never invent a second node on top of an existing one
   const g = B.gridSnap;
   const gx = Math.round(x / g) * g, gy = Math.round(y / g) * g;
   if (design && !o.noNodes) {

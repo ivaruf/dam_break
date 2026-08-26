@@ -364,9 +364,11 @@ sizing (min 44px touch targets).
 - Pointer down on empty/node + drag = ghost member; release = place (both nodes
   created/merged via snapping). Right-click or eraser tool = delete member.
   Tap node/member selects. `input:*` events carry world coords already.
-- Snapping: existing nodes (r≈0.6 m), anchors (r≈0.9), grid 0.5 m; max/min member
-  length by material; cost preview on ghost; invalid = red ghost (over budget,
-  too long, outside buildZone, inside terrain).
+- Snapping: existing nodes (r≈0.6 m), anchors (r≈0.9), the armed reach circle's
+  rim (r≈0.6, snapPoint opts.rim — lands at exactly maxLength, so max-length
+  beams are one click), grid 0.5 m — in that order; max/min member length by
+  material; cost preview on ghost; invalid = red ghost (over budget, too long,
+  outside buildZone, inside terrain).
 - Keys: 1–4 materials, Space release/pause, R retry, Delete remove selection,
   X box-delete tool, E erase.
 - BUILDING v4 — THE REACH CIRCLE (all inputs: mouse, pen, touch): a build

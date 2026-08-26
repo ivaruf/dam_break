@@ -223,11 +223,15 @@ function pulse(kind, x, y) {
 
 // Is this world point inside the armed circle? The RAW point, not the snapped
 // one: the drawn circle is what the player is aiming at, and a click past its
-// edge means "start a new run over there", not "build a beam to there".
-function inReach(x, y) {
+// edge means "start a new run over there", not "build a beam to there". The rim
+// band counts as inside — the rim is a snap target now (snapOptsFor), and a
+// click that will land ON the edge must complete, not dismiss: half the presses
+// aimed at the drawn line fall a few pixels outside it.
+function inReach(x, y, touch) {
   const rc = B.reach;
   if (!rc) return false;
-  return Math.hypot(x - rc.x, y - rc.y) <= rc.r;
+  const tol = CONFIG.build.rimSnap * (touch ? CONFIG.touch.snapMul : 1);
+  return Math.hypot(x - rc.x, y - rc.y) <= rc.r + tol;
 }
 
 // ---- lifecycle ------------------------------------------------------------
@@ -599,8 +603,18 @@ function dpr() {
 // swallowing every click that meant "beam to here" and reading it as "tap the
 // start, finish the run" instead. Within a node's plain snap radius, a click
 // means THAT node: that is the honest rule and the one the circle draws.
+//
+// While a run is ARMED, the circle's own rim rides along as a snap target
+// (CONFIG.build.rimSnap): a click near the edge lands ON it, at exactly
+// maxLength — the whole rim means "the longest beam this material has". The
+// renderer samples the region with these same opts, so the picture pops to the
+// rim exactly where a click would.
 export function snapOptsFor(touch) {
-  return touch ? { radiusMul: CONFIG.touch.snapMul } : undefined;
+  const rc = B.reach;
+  if (!touch && !rc) return undefined;
+  const o = touch ? { radiusMul: CONFIG.touch.snapMul } : {};
+  if (rc) o.rim = { x: rc.x, y: rc.y, r: rc.r };
+  return o;
 }
 
 function snapAt(x, y, touch) {
@@ -705,7 +719,7 @@ function buildDown(p) {
   const snap = snapAt(p.x, p.y, touch);
   const joint = (snap.nodeId || snap.anchorId) ? snap : null;
   const armed = !!B.chainHead;
-  const inside = armed && inReach(p.x, p.y);
+  const inside = armed && inReach(p.x, p.y, touch);
 
   let from = null;
   let fresh = false;

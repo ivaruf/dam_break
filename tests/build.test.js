@@ -105,6 +105,25 @@ section('1. SNAPPING PRIORITY');
     members: [],
   };
   eq(snapPoint(10.35, 10, two, TERRAIN).nodeId, 'b', 'nearest node wins over first found');
+
+  // the armed reach circle's RIM (opts.rim): above the grid, below nodes/anchors
+  const rim = { x: 26, y: 3, r: 5 };
+  const r1 = snapPoint(26, 7.7, design, TERRAIN, { rim });        // 0.3 m inside
+  eq(r1.kind, 'rim', 'a point within rimSnap of the rim snaps ONTO it');
+  near(Math.hypot(r1.x - 26, r1.y - 3), 5, 1e-5, 'at exactly the rim radius');
+  near(r1.x, 26, 1e-9, 'along the ray from the armed start');
+  ok(Math.hypot(r1.x - 26, r1.y - 3) <= 5, 'and never a float ulp PAST it');
+  const r2 = snapPoint(26, 8.3, design, TERRAIN, { rim });        // 0.3 m outside
+  eq(r2.kind, 'rim', 'the band works from OUTSIDE the drawn edge too');
+  eq(snapPoint(26, 7.2, design, TERRAIN, { rim }).kind, 'grid',
+    'inside the band the grid still owns the point');
+  eq(snapPoint(26, 7, design, TERRAIN, { rim, radiusMul: CONFIG.touch.snapMul }).kind, 'rim',
+    'touch widens the rim band exactly as it widens a joint');
+  eq(snapPoint(26, 7, design, TERRAIN, { rim }).kind, 'grid',
+    'where a mouse at the same point still gets the grid');
+  const rimD = { nodes: [{ id: 'r1', x: 26, y: 7.8, anchorId: null }], members: [] };
+  eq(snapPoint(26.1, 7.6, rimD, TERRAIN, { rim }).nodeId, 'r1',
+    'a joint near the rim still outranks the rim');
 }
 
 // ------------------------------------------------------------- 2. validate --
@@ -1332,8 +1351,9 @@ section('10. BUILDING v4 — THE REACH CIRCLE');
 
       solo();
       press(startPt.x, startPt.y);                 // re-arm the same start
-      const drawn = classifyReachGeom(startPt, x, y, mat, dsg, TR, LV, builder.budgetLeft());
-      const real = classifyReach(startPt, x, y, mat, dsg, TR, LV, builder.budgetLeft());
+      const opts = builder.snapOptsFor(false);     // the gesture's own snap, rim included
+      const drawn = classifyReachGeom(startPt, x, y, mat, dsg, TR, LV, builder.budgetLeft(), opts);
+      const real = classifyReach(startPt, x, y, mat, dsg, TR, LV, builder.budgetLeft(), opts);
       const n0 = dsg.members.length;
       B.reachPulse = null;
       press(x, y);
@@ -1434,6 +1454,7 @@ section('10. BUILDING v4 — THE REACH CIRCLE');
     ok(!!B.reach, 'setup: armed on the middle joint');
     const startPt = { x: 28, y: 6, nodeId: B.chainHead.nodeId, anchorId: null, kind: 'node' };
     const mat = MATERIALS.timber;
+    const opts = builder.snapOptsFor(false);       // the gesture's own snap, rim included
     let checked = 0, litNearJoints = 0, wrongDark = 0;
     for (const n of design.nodes.slice()) {
       if (Math.hypot(n.x - 28, n.y - 6) > 4.4 || (n.x === 28 && n.y === 6)) continue;
@@ -1441,8 +1462,8 @@ section('10. BUILDING v4 — THE REACH CIRCLE');
         const a = (k / 12) * Math.PI * 2;
         const x = n.x + Math.cos(a) * 0.3, y = n.y + Math.sin(a) * 0.3;
         if (Math.hypot(x - 28, y - 6) > 4.9) continue;
-        const drawn = classifyReachGeom(startPt, x, y, mat, design, TERRAIN, L, builder.budgetLeft());
-        const real = classifyReach(startPt, x, y, mat, design, TERRAIN, L, builder.budgetLeft());
+        const drawn = classifyReachGeom(startPt, x, y, mat, design, TERRAIN, L, builder.budgetLeft(), opts);
+        const real = classifyReach(startPt, x, y, mat, design, TERRAIN, L, builder.budgetLeft(), opts);
         checked++;
         if (drawn === REACH_OK) litNearJoints++;
         if (drawn !== REACH_OK && real === REACH_OK) wrongDark++;
@@ -1466,6 +1487,62 @@ section('10. BUILDING v4 — THE REACH CIRCLE');
     eq(design.members.length, 2, 'a click near a joint inside the circle builds to it');
     eq(design.nodes.length, 3, 'snapping to the closest connection point, not next to it');
     ok(!!nodeAt(26, 7), 'the joint it landed on is exactly the one already there');
+  }
+
+  // ---- E2. the RIM is an anchor: the longest beam is one click ------------
+  // The circle's edge snaps like a joint (CONFIG.build.rimSnap), so aiming at
+  // the drawn line — a little inside it, ON it, or a little past it — builds a
+  // beam of exactly material.maxLength. And because the renderer samples with
+  // the same snap, the lit region runs flush to the edge instead of fraying
+  // into 'too long' slivers wherever the grid rounded a near-rim point outward.
+  reset();
+  {
+    const rMax = MATERIALS.timber.maxLength;
+    const beamLen = () => {
+      const m = design.members[design.members.length - 1];
+      const a = design.nodes.find((n) => n.id === m.a);
+      const b = design.nodes.find((n) => n.id === m.b);
+      return Math.hypot(b.x - a.x, b.y - a.y);
+    };
+
+    press(26, 3);                                  // armed, radius 5
+    press(26, 3 + rMax - 0.3);                     // 4.7 m up: inside the band
+    eq(design.members.length, 1, 'a click just inside the drawn edge builds');
+    near(beamLen(), rMax, 1e-4, 'a beam of exactly maxLength — the rim snapped it');
+
+    reset();
+    press(26, 3);
+    press(26, 3 + rMax + 0.3);                     // 5.3 m up: just PAST the edge
+    eq(design.members.length, 1,
+      'a click just outside the edge is a completion too, not a dismissal');
+    near(beamLen(), rMax, 1e-4, 'and lands the same max-length beam');
+
+    reset();
+    press(26, 3);
+    press(26, 7);                                  // 4 m up: clear of the band
+    eq(design.members.length, 1, 'deeper inside, the grid still owns the click');
+    near(beamLen(), 4, 1e-9, 'and the beam is the grid length the player aimed');
+  }
+  // …and the PICTURE agrees: open sky riding just inside the rim is lit all
+  // the way round, because the samples rim-snap exactly like the clicks. This
+  // is the regression test for the fringe of dark slivers at the circle's edge.
+  reset();
+  {
+    press(26, 3);
+    const rc = B.reach;
+    const startPt = { x: rc.x, y: rc.y, nodeId: rc.nodeId, anchorId: rc.anchorId, kind: rc.kind };
+    const opts = builder.snapOptsFor(false);
+    const mat = MATERIALS.timber;
+    let dark = 0, n = 0;
+    for (let i = 0; i <= 40; i++) {                // 15°–100°: in-zone open sky
+      const a = ((15 + (85 * i) / 40) * Math.PI) / 180;
+      const x = 26 + Math.cos(a) * rc.r * 0.98, y = 3 + Math.sin(a) * rc.r * 0.98;
+      n++;
+      if (classifyReachGeom(startPt, x, y, mat, design, TERRAIN, L,
+        builder.budgetLeft(), opts) === REACH_BAD) dark++;
+    }
+    eq(dark, 0, `no 'too long' fringe just inside the rim (${dark}/${n} samples dark)`);
+    solo();
   }
 
   // ---- F. one girder, two clicks — and then NOTHING is armed --------------

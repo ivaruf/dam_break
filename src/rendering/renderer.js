@@ -1234,6 +1234,13 @@ function drawGhost(ctx) {
 // smooth path — instead of a staircase of per-sample tiles. Nothing is ever
 // painted outside the circle: the expansion itself is a clip.
 //
+// The RIM is clean for the same snap-first reason. The circle's edge is itself
+// a snap target (snapPoint's opts.rim, carried by snapOptsFor while a run is
+// armed), so every sample near the rim lands ON it at exactly maxLength and the
+// lit region runs flush to the drawn edge — where it used to fray into a fringe
+// of dark slivers wherever the 0.5 m grid rounded a near-rim sample past
+// maxLength into 'too long'.
+//
 // The sampling happens once per arm (and again only when reach.version says the
 // region could have moved — material, budget, design). Everything animated here
 // is a function of the renderer's own frame COUNT, never a clock.
@@ -1668,7 +1675,9 @@ function snapMark(ctx, snap, alpha) {
   ctx.globalAlpha = alpha;
   ctx.beginPath();
   ctx.arc(px, py, r, 0, TAU);
-  ctx.strokeStyle = kind === 'anchor' ? R.anchorColor : kind === 'node' ? R.nodeColor : R.buildZoneLine;
+  // a rim snap is drawn in the circle's own green: "this IS the max beam"
+  ctx.strokeStyle = kind === 'anchor' ? R.anchorColor : kind === 'node' ? R.nodeColor
+    : kind === 'rim' ? RE.okColor : R.buildZoneLine;
   ctx.lineWidth = Math.max(1, 1.6 * dpr);
   ctx.stroke();
   if (kind === 'anchor') {

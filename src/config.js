@@ -234,6 +234,14 @@ export const CONFIG = {
   build: {
     nodeSnap: 0.6,         // m
     anchorSnap: 0.9,       // m
+    rimSnap: 0.6,          // m — the reach circle's EDGE is a snap target, like an
+                           // anchor: within this of the rim (× touch.snapMul for a
+                           // finger) the endpoint lands at exactly maxLength. Below
+                           // nodes/anchors, above the grid — grid points near the
+                           // rim quantise PAST maxLength and refuse as 'too long',
+                           // which is also what used to fray the circle's edge.
+                           // The price is that grid lengths in (r − rimSnap, r)
+                           // become the max beam instead; joints there still win.
     gridSnap: 0.5,         // m
     minAngleDeg: 8,        // reject members nearly parallel to an existing one at same node
 
