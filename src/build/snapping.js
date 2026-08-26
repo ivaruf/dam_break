@@ -423,13 +423,58 @@ export function classifySnapped(start, end, mat, design, terrain, level, budgetL
   return v.reason === 'over budget' ? REACH_BUDGET : REACH_BAD;
 }
 
+// THE END OF A BUILD GESTURE: snapPoint, then boundary repair. The grid is a
+// quantisation, not a target — and near a legal edge it rounds a click INTO the
+// dirt or OUT of the zone, which both hands the player a refusal they did not
+// aim for and draws the lit region's edge as a staircase of grid rounding. So
+// when the snapped end refuses for a PLACE reason, slide it to the nearest
+// legal spot instead — clamp into the build zone, lift onto the ground surface,
+// pull back inside maxLength — and accept the repair only if it stays within
+// CONFIG.build.boundarySnap (× the gesture's radiusMul) of the raw point.
+//
+// Because boundarySnap exceeds the grid's half-diagonal, every raw point whose
+// grid target was legal is also within repair range of the legal set — so the
+// build/no-build boundary becomes the TRUE geometric line offset by exactly
+// boundarySnap, smooth along every ray, instead of the staircase.
+//
+// Nodes and anchors are never repaired: clicking a joint means that joint, and
+// its refusal is honest. A repair the final geometry check still refuses (a
+// mid-span hill cut, 'too short') falls back to the honest original refusal.
+export function snapEnd(start, x, y, mat, design, terrain, level, opts) {
+  const end = snapPoint(x, y, design, terrain, opts);
+  if (!mat || !start) return end;
+  if (end.nodeId || end.anchorId) return end;
+  if (!geometryReason(start, end, mat, terrain, level)) return end;
+
+  const B = CONFIG.build;
+  const mul = opts && opts.radiusMul > 0 ? opts.radiusMul : 1;
+  let cx = x, cy = y;
+  if (level && level.buildZone) {
+    cx = Math.min(Math.max(cx, level.buildZone.x0), level.buildZone.x1);
+  }
+  if (terrain && terrain.heightAt) {
+    const h = terrain.heightAt(cx);
+    if (cy < h) cy = h;
+  }
+  const dx = cx - start.x, dy = cy - start.y;
+  const len = Math.hypot(dx, dy);
+  if (len > mat.maxLength) {
+    const s = (mat.maxLength - 1e-6) / len;
+    cx = start.x + dx * s; cy = start.y + dy * s;
+  }
+  if (Math.hypot(cx - x, cy - y) > B.boundarySnap * mul) return end;
+  const fixed = { x: cx, y: cy, nodeId: null, anchorId: null, kind: 'edge' };
+  return geometryReason(start, fixed, mat, terrain, level) ? end : fixed;
+}
+
 // What happens if the player clicks the RAW world point (x, y) with a run armed
-// at `start`: the point is snapped first, exactly as the pointer flow snaps it
-// (`snapOpts` is the same opts object the gesture would pass — radiusMul for a
-// touch), and then validate() decides. This is the CLICK-TIME truth, and the
-// tests use it to check that the drawn circle does not lie.
+// at `start`: the point is snapped (and boundary-repaired) exactly as the
+// pointer flow does it (`snapOpts` is the same opts object the gesture would
+// pass — radiusMul for a touch), and then validate() decides. This is the
+// CLICK-TIME truth, and the tests use it to check that the drawn circle does
+// not lie.
 export function classifyReach(start, x, y, mat, design, terrain, level, budgetLeft, snapOpts) {
-  const end = snapPoint(x, y, design, terrain, snapOpts);
+  const end = snapEnd(start, x, y, mat, design, terrain, level, snapOpts);
   return classifySnapped(start, end, mat, design, terrain, level, budgetLeft);
 }
 
@@ -451,8 +496,8 @@ export function reachGeom(start, end, mat, terrain, level, budgetLeft) {
   return overBudget(start, end, mat, budgetLeft) ? REACH_BUDGET : REACH_OK;
 }
 
-// reachGeom at a RAW world point: snap first, exactly like a click.
+// reachGeom at a RAW world point: snap and repair first, exactly like a click.
 export function classifyReachGeom(start, x, y, mat, design, terrain, level, budgetLeft, snapOpts) {
-  const end = snapPoint(x, y, design, terrain, snapOpts);
+  const end = snapEnd(start, x, y, mat, design, terrain, level, snapOpts);
   return reachGeom(start, end, mat, terrain, level, budgetLeft);
 }

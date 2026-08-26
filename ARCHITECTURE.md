@@ -366,9 +366,13 @@ sizing (min 44px touch targets).
   Tap node/member selects. `input:*` events carry world coords already.
 - Snapping: existing nodes (r≈0.6 m), anchors (r≈0.9), the armed reach circle's
   rim (r≈0.6, snapPoint opts.rim — lands at exactly maxLength, so max-length
-  beams are one click), grid 0.5 m — in that order; max/min member length by
-  material; cost preview on ghost; invalid = red ghost (over budget, too long,
-  outside buildZone, inside terrain).
+  beams are one click), grid 0.5 m — in that order; then BOUNDARY REPAIR
+  (snapping.snapEnd, r≈0.45): a gesture end whose snap refuses for a PLACE
+  reason slides to the nearest legal spot (onto the ground surface, to the zone
+  edge, inside maxLength) — never a node/anchor — so the reach circle's
+  build/no-build edge is the true geometric line, smooth, not grid staircase.
+  Max/min member length by material; cost preview on ghost; invalid = red ghost
+  (over budget, too long, outside buildZone, inside terrain).
 - Keys: 1–4 materials, Space release/pause, R retry, Delete remove selection,
   X box-delete tool, E erase.
 - BUILDING v4 — THE REACH CIRCLE (all inputs: mouse, pen, touch): a build
@@ -380,8 +384,10 @@ sizing (min 44px touch targets).
   anywhere lit commits the girder to the snapped point and THE CIRCLE
   DISMISSES — nothing stays armed; chaining is just re-arming the fresh
   joint. Press-drag-release inside the circle commits in one gesture.
-  Outside: anchor/joint re-arms, member selects, empty dismisses; clicking
-  the armed start cancels. Refusals pulse (red = geometry, amber = budget,
+  Outside: anchor/joint re-arms, member TAP selects, empty TAP dismisses;
+  clicking the armed start cancels. A DRAG from any press that cannot build
+  (build tool, no completion, no joint) PANS the camera past tapMax — and a
+  pan never dismisses the circle. Refusals pulse (red = geometry, amber = budget,
   small local mark = design rules like 'already built'), no hint text except
   'over budget'. Split authority: snapping.geometryReason() draws the PLACE;
   validate() (geometry + design rules) judges the MEMBER on click.

@@ -242,6 +242,17 @@ export const CONFIG = {
                            // which is also what used to fray the circle's edge.
                            // The price is that grid lengths in (r − rimSnap, r)
                            // become the max beam instead; joints there still win.
+    boundarySnap: 0.45,    // m — a gesture end whose snap REFUSES this close to a
+                           // legal spot slides onto it instead (lifted to the
+                           // ground surface, clamped to the zone edge, pulled
+                           // back inside maxLength — snapping.snapEnd): the click
+                           // builds the thing it meant, and the build/no-build
+                           // shadow's edge becomes the true geometric line offset
+                           // by exactly this — smooth — instead of a staircase of
+                           // 0.5 m grid rounding. Must stay ABOVE the grid half-
+                           // diagonal (0.354 m) or the staircase comes back;
+                           // × touch.snapMul for a finger. Nodes and anchors are
+                           // never repaired: clicking a joint means that joint.
     gridSnap: 0.5,         // m
     minAngleDeg: 8,        // reject members nearly parallel to an existing one at same node
 

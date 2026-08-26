@@ -35,6 +35,12 @@
 //      not a chain-ending gesture. A click on a REFUSING slice inside the circle
 //      pulses that slice — red for geometry, amber for money — places nothing,
 //      and leaves the circle up, because a refusal should cost one click.
+//   6. A DRAG from a press that cannot build (no completion, no joint) PANS the
+//      camera — one finger / one button, so nobody two-finger-scrolls or zooms
+//      out and in again just to move around. The pan gate is tapMax, so a
+//      gesture is never both a pan and a tap — and a pan never dismisses the
+//      circle: navigation costs nothing (the dismissal in rule 5 waits for the
+//      release and only a TAP confirms it).
 //
 // What is left of the old vocabulary, unchanged:
 //   right button   → delete the member under the cursor
@@ -64,7 +70,7 @@ import { CONFIG } from '../config.js';
 import { on, emit } from '../core/events.js';
 import { getScene } from '../core/game.js';
 import {
-  snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect, hitTol,
+  snapPoint, snapEnd, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect, hitTol,
   reachRadius, affordRadius,
 } from './snapping.js';
 import { MATERIALS, MATERIAL_ORDER } from './materials.js';
@@ -621,6 +627,14 @@ function snapAt(x, y, touch) {
   return snapPoint(x, y, B.design, B.terrain, snapOptsFor(touch));
 }
 
+// The END of a build gesture from `from`: the same snap, plus the boundary
+// repair (snapping.snapEnd) — a refused grid point near the ground, the zone
+// edge or the rim slides onto it, so the click builds the thing it meant and
+// the drawn shadow's edge is the true line, not a staircase of grid rounding.
+function snapEndAt(from, x, y, touch) {
+  return snapEnd(from, x, y, MATERIALS[B.material], B.design, B.terrain, B.level, snapOptsFor(touch));
+}
+
 // Two snapped points that mean the same place. Both are quantised (node /
 // anchor / 0.5 m grid), so this is exact rather than fuzzy: it answers "would
 // the beam between these two be a zero-length stub?".
@@ -701,8 +715,12 @@ function onDown(p) {
 //   • on an anchor or a joint  → ARM there. A circle already up somewhere else is
 //     replaced: clicking a different foundation means "start over there".
 //   • nothing armed, or the press is outside the circle, and it is not on a
-//     joint → the press cannot build. It dismisses the circle, and on release a
-//     tap selects whatever member is under it.
+//     joint → the press CANNOT BUILD, so its drag is free to mean the other
+//     thing a drag on a map means: PAN. A tap still selects the member under
+//     it (or dismisses the circle); a drag moves the camera — one finger, one
+//     button, no two-finger scroll or zoom-out-zoom-in detour — and because
+//     navigation must cost nothing, a pan does NOT dismiss the circle: the
+//     dismissal waits for the release and only a tap confirms it.
 //
 // Nothing is committed here and nothing is locked in: a press only ever chooses
 // a preview.
@@ -723,6 +741,7 @@ function buildDown(p) {
 
   let from = null;
   let fresh = false;
+  let dismiss = false;
   if (armed && inside) {
     from = B.chainHead;
     // the drawn region must snap the way THIS gesture snaps: a circle armed by
@@ -734,8 +753,12 @@ function buildDown(p) {
     from = B.chainHead;
     fresh = true;
   } else if (armed) {
-    disarm();                                // outside, on empty or on a member
-  }
+    dismiss = true;          // outside, on empty or on a member: a TAP dismisses
+  }                          // on release — a drag is a pan and keeps the circle
+
+  // the gesture end takes the boundary repair; the arming/lift decisions above
+  // deliberately used the plain snap (a repaired point is never a joint)
+  const end = from ? snapEndAt(from, p.x, p.y, touch) : snap;
 
   B.drag = {
     mode: 'build',
@@ -743,10 +766,13 @@ function buildDown(p) {
     start: from,             // named `start` so cleanupOrphans keeps protecting it
     from,
     fresh,                   // this press is what armed the circle
+    dismiss,                 // this press means "never mind" IF it stays a tap
+    panning: false,          // a from-less drag past tapMax moves the camera
     px0: p.px, py0: p.py, t0: now(),
+    lpx: p.px, lpy: p.py,    // last pointer position, for pan deltas
     lx: p.x, ly: p.y,
     x0: p.x, y0: p.y,
-    last: snap,
+    last: end,
     snapped: false,
     moved: false,
     holdNodeId: snap.kind === 'node' ? snap.nodeId : null,
@@ -755,8 +781,8 @@ function buildDown(p) {
   clearMarquee();
   // Publish the snap immediately: on the very first contact the snap ring IS
   // the answer to "where will this land?", and the loupe magnifies it.
-  B.hover = { x: p.x, y: p.y, snap };
-  updateGhost(snap);
+  B.hover = { x: p.x, y: p.y, snap: end };
+  updateGhost(end);
 }
 
 // ---- pointer move ---------------------------------------------------------
@@ -769,8 +795,12 @@ function onMove(p) {
 
   if (!B.drag) {                                  // hover (mouse only, cosmetic)
     if (p.hover) {
-      // the hover mark shows exactly where a click would land: same snap, no bonus
-      B.hover = { x: p.x, y: p.y, snap: snapAt(p.x, p.y, false) };
+      // the hover mark shows exactly where a click would land: same snap, no
+      // bonus — and with a run armed, the same boundary repair the click gets
+      B.hover = {
+        x: p.x, y: p.y,
+        snap: B.chainHead ? snapEndAt(B.chainHead, p.x, p.y, false) : snapAt(p.x, p.y, false),
+      };
       const del = B.tool === 'erase' || B.tool === 'boxdelete';
       B.hoverMember = hitTestMember(p.x, p.y, B.design, tolerance(del ? CONFIG.build.eraseTolMul : 1));
     }
@@ -802,9 +832,22 @@ function onMove(p) {
   // after the hold, which is also the first moment the node has anywhere to go.
   if (B.drag.holdNodeId && holdCheck(travel)) { nodeDragMove(p); return; }
 
+  // No start to build from: the drag PANS. One finger or one button moves the
+  // map — no two-finger scroll, no zoom-out-and-in detour. The gate is tapMax,
+  // not dragMinPx, so a gesture is never both a pan and a tap: under it the
+  // release still selects/dismisses, past it the press is navigation and
+  // nothing else (see buildCommit).
+  if (!B.drag.from) {
+    const gate = B.drag.touch ? CONFIG.touch.tapMaxPx * dpr() : CONFIG.build.tapMaxPx;
+    if (!B.drag.panning && travel > gate) B.drag.panning = true;
+    if (B.drag.panning) emit('input:pan', { dx: p.px - B.drag.lpx, dy: p.py - B.drag.lpy });
+    B.drag.lpx = p.px; B.drag.lpy = p.py;
+    return;
+  }
+
   // Sliding only ever re-snaps the preview: adjust, then release. The far end
-  // takes no chain bonus (see snapOptsFor).
-  const end = snapAt(p.x, p.y, B.drag.touch);
+  // takes no chain bonus (see snapOptsFor) but does take the boundary repair.
+  const end = snapEndAt(B.drag.from, p.x, p.y, B.drag.touch);
   B.drag.last = end;
   B.hover.snap = end;
   updateGhost(end);
@@ -844,11 +887,13 @@ function onUp(p) {
 
 // THE commit point, mouse and touch alike: the pointer has left, and where it
 // left is what gets built. In order:
-//   1. no armed start under this press → a TAP selects the member under it (and
-//      an empty tap clears the selection). This is the only gesture in v4 that
-//      is not about building, and it is why touch can select again at all: a
-//      press on empty ground no longer places anything, so it is free to mean
-//      something else.
+//   1. no armed start under this press → a TAP selects the member under it (an
+//      empty tap clears the selection, and dismisses whatever circle the press
+//      landed outside of). This is the only gesture in v4 that is not about
+//      building, and it is why touch can select again at all: a press on empty
+//      ground no longer places anything, so it is free to mean something else.
+//      Past a tap the gesture was a PAN — it selects nothing and dismisses
+//      nothing, because looking around must never cost the player their run.
 //   2. released back ON the armed start → dismiss the circle, unless this same
 //      press is what armed it (arming and dismissing on one click would make the
 //      circle un-openable). This is "never mind", not "I have finished": after a
@@ -863,11 +908,14 @@ function buildCommit(p, drag, ghost) {
   const tap = travel <= tapMax;
 
   if (!drag.from) {
-    if (tap) B.selection = hitTestMember(p.x, p.y, B.design, tolerance());
+    if (tap) {
+      if (drag.dismiss) disarm();
+      B.selection = hitTestMember(p.x, p.y, B.design, tolerance());
+    }
     return;
   }
 
-  const end = (ghost && ghost.end) || snapAt(p.x, p.y, drag.touch);
+  const end = (ghost && ghost.end) || snapEndAt(drag.from, p.x, p.y, drag.touch);
 
   if (samePoint(drag.from, end)) {
     if (tap && !drag.fresh) disarm();

@@ -7,7 +7,7 @@ import { CONFIG } from '../src/config.js';
 import { emit, on } from '../src/core/events.js';
 import { createTerrain } from '../src/core/terrain.js';
 import {
-  snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect,
+  snapPoint, snapEnd, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect,
   segRectDistance, hitTol,
   classifyReach, classifyReachGeom, reachGeom, geometryReason,
   reachRadius, affordRadius, REACH_OK, REACH_BAD, REACH_BUDGET,
@@ -124,6 +124,23 @@ section('1. SNAPPING PRIORITY');
   const rimD = { nodes: [{ id: 'r1', x: 26, y: 7.8, anchorId: null }], members: [] };
   eq(snapPoint(26.1, 7.6, rimD, TERRAIN, { rim }).nodeId, 'r1',
     'a joint near the rim still outranks the rim');
+
+  // boundary repair (snapEnd): a refused grid point slides to the nearest
+  // legal spot within boundarySnap; past it the honest refusal stands
+  const SL = level();
+  const start0 = { x: 26, y: 3, nodeId: null, anchorId: 'a0', kind: 'anchor' };
+  const e1 = snapEnd(start0, 27.3, 2.7, MATERIALS.timber, design, TERRAIN, SL);
+  eq(e1.kind, 'edge', 'a grid point rounded into the dirt is repaired');
+  near(e1.y, 3, 1e-9, 'lifted onto the ground surface');
+  near(e1.x, 27.3, 1e-9, 'at the raw x, not the grid x');
+  const e2 = snapEnd(start0, 23.7, 5, MATERIALS.timber, design, TERRAIN, SL);
+  eq(e2.kind, 'edge', 'a grid point rounded out of the zone is repaired');
+  near(e2.x, 24, 1e-9, 'clamped exactly onto the zone edge');
+  near(e2.y, 5, 1e-9, 'keeping the raw y');
+  const e3 = snapEnd(start0, 23.5, 3.5, MATERIALS.timber, design, TERRAIN, SL);
+  eq(e3.kind, 'grid', 'past boundarySnap the honest grid refusal stands');
+  const e4 = snapEnd(start0, 27.5, 5, MATERIALS.timber, design, TERRAIN, SL);
+  eq(e4.kind, 'grid', 'a legal grid point is never touched by the repair');
 }
 
 // ------------------------------------------------------------- 2. validate --
@@ -1545,6 +1562,66 @@ section('10. BUILDING v4 — THE REACH CIRCLE');
     solo();
   }
 
+  // ---- E3. boundary repair: the shadow's edge is the TRUE line ------------
+  // The grid is a quantisation, and near a legal edge it rounds clicks into
+  // the dirt or out of the zone — refusals the player did not aim for, and a
+  // build/no-build boundary drawn as a staircase. A refused grid point within
+  // CONFIG.build.boundarySnap of a legal spot slides onto it instead, so a
+  // near-miss click builds the thing it meant and the boundary is the true
+  // geometric line offset by exactly boundarySnap — smooth on every ray.
+  reset();
+  {
+    press(26, 3);
+    press(27.3, 2.7);            // grid wants (27.5, 2.5): 0.5 m into the dirt
+    eq(design.members.length, 1, 'a click whose grid point is underground builds');
+    ok(!!nodeAt(27.3, 3), 'lifted ONTO the surface at the raw x, not quantised away');
+
+    reset();
+    press(26, 3);
+    press(23.7, 5);              // grid wants (23.5, 5): outside the 24.. zone
+    eq(design.members.length, 1, 'a click whose grid point is out of zone builds');
+    ok(!!nodeAt(24, 5), 'clamped exactly onto the zone edge');
+
+    reset();
+    press(26, 3);
+    B.reachPulse = null;
+    press(23.5, 3.5);            // 0.5 m out: past boundarySnap for a mouse
+    eq(design.members.length, 0, 'past the repair distance the refusal stands');
+    eq(B.reachPulse.kind, 'bad', 'and pulses like any geometry refusal');
+  }
+  // …and the drawn shadow agrees: just inside the offset line a whole stretch
+  // is lit, just outside it the whole stretch is dark — no staircase, along
+  // the ground and down the zone edge alike.
+  reset();
+  {
+    press(26, 3);
+    const rc = B.reach;
+    const startPt = { x: rc.x, y: rc.y, nodeId: rc.nodeId, anchorId: rc.anchorId, kind: rc.kind };
+    const opts = builder.snapOptsFor(false);
+    const mat = MATERIALS.timber;
+    const R = CONFIG.build.boundarySnap;
+    let wrong = 0, n = 0;
+    for (let i = 0; i <= 20; i++) {              // along the flat ground, clear
+      const x = 27.05 + (0.9 * i) / 20;          // of both anchors' snap discs
+      n += 2;
+      if (classifyReachGeom(startPt, x, 3 - R + 0.1, mat, design, TERRAIN, L,
+        builder.budgetLeft(), opts) !== REACH_OK) wrong++;
+      if (classifyReachGeom(startPt, x, 3 - R - 0.15, mat, design, TERRAIN, L,
+        builder.budgetLeft(), opts) !== REACH_BAD) wrong++;
+    }
+    for (let i = 0; i <= 20; i++) {              // and down the zone edge
+      const y = 4 + (2.5 * i) / 20;
+      n += 2;
+      if (classifyReachGeom(startPt, 24 - R + 0.1, y, mat, design, TERRAIN, L,
+        builder.budgetLeft(), opts) !== REACH_OK) wrong++;
+      if (classifyReachGeom(startPt, 24 - R - 0.15, y, mat, design, TERRAIN, L,
+        builder.budgetLeft(), opts) !== REACH_BAD) wrong++;
+    }
+    eq(wrong, 0,
+      `the shadow's edge is the true line offset by boundarySnap (${wrong}/${n} wrong)`);
+    solo();
+  }
+
   // ---- F. one girder, two clicks — and then NOTHING is armed --------------
   reset();
   {
@@ -1604,6 +1681,38 @@ section('10. BUILDING v4 — THE REACH CIRCLE');
     eq(B.chainHead, null, 'a click on empty ground outside the circle dismisses the circle');
     eq(B.reach, null, 'the circle goes with it');
     eq(design.members.length, 1, 'and nothing is built or destroyed');
+  }
+
+  // ---- G2. a press that cannot build PANS the map --------------------------
+  // The other thing a drag on a map means. One finger / one button, gated at
+  // tapMax so no gesture is ever both a pan and a tap — and a pan never
+  // dismisses the circle, because looking around must cost the player nothing.
+  reset();
+  {
+    let panned = [];
+    const offPan = on('input:pan', (e) => panned.push(e));
+
+    down(at(27.3, 8)); move(at(28.3, 8.5)); move(at(29.3, 9)); up(at(29.3, 9));
+    ok(panned.length > 0, 'a drag from empty ground pans the camera');
+    ok(panned.reduce((s, e) => s + e.dx, 0) > 0, 'in the direction the pointer moved');
+    eq(design.members.length, 0, 'and builds nothing');
+    eq(B.selection, null, 'and selects nothing');
+
+    panned = [];
+    press(26, 3);
+    ok(!!B.reach, 'setup: armed');
+    down(at(33, 10)); move(at(34, 11)); up(at(34, 11));  // far outside the circle
+    ok(panned.length > 0, 'a drag outside the circle pans too');
+    ok(!!B.reach, 'and the circle SURVIVES: navigation costs nothing');
+    press(33, 10);
+    eq(B.reach, null, 'while the TAP it stayed under still dismisses it');
+
+    panned = [];
+    press(26, 3);
+    down(at(26, 6)); move(at(27, 7)); up(at(27, 7));     // INSIDE the circle
+    eq(panned.length, 0, 'a drag inside the circle never pans: it draws the beam');
+    eq(design.members.length, 1, 'and commits it');
+    offPan();
   }
 
   // ---- H. a refused click PULSES, and the run survives --------------------

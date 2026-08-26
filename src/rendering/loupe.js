@@ -42,6 +42,10 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 export function render(ctx, S) {
   if (!L.active || S.phase !== 'build') return;
+  // a drag that is PANNING the map has nothing under the finger to magnify —
+  // the whole world is moving with it
+  const BB = getBuilder();
+  if (BB.drag && BB.drag.panning) return;
   const R = CONFIG.loupe;
   const canvas = ctx.canvas;
   const cw = canvas.clientWidth;

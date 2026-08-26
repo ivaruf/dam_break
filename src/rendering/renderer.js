@@ -1239,7 +1239,11 @@ function drawGhost(ctx) {
 // armed), so every sample near the rim lands ON it at exactly maxLength and the
 // lit region runs flush to the drawn edge — where it used to fray into a fringe
 // of dark slivers wherever the 0.5 m grid rounded a near-rim sample past
-// maxLength into 'too long'.
+// maxLength into 'too long'. The GROUND and ZONE edges are clean for the same
+// reason one level up: snapping.snapEnd repairs a refused grid point onto the
+// nearest legal spot within CONFIG.build.boundarySnap, so the build/no-build
+// boundary is the true geometric line offset by exactly that — smooth — rather
+// than the staircase of grid rounding it used to be.
 //
 // The sampling happens once per arm (and again only when reach.version says the
 // region could have moved — material, budget, design). Everything animated here
@@ -1670,7 +1674,8 @@ function snapMark(ctx, snap, alpha) {
   if (!snap) return;
   const kind = snap.kind || (snap.nodeId ? 'node' : snap.anchorId ? 'anchor' : 'grid');
   const px = SX(snap.x), py = SY(snap.y);
-  const r = (kind === 'grid' ? 3.2 : 5.2) * dpr;
+  // a boundary-repaired end ('edge') is grid-sized: it is a place, not a target
+  const r = (kind === 'grid' || kind === 'edge' ? 3.2 : 5.2) * dpr;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.beginPath();
