@@ -369,14 +369,25 @@ sizing (min 44px touch targets).
   too long, outside buildZone, inside terrain).
 - Keys: 1–4 materials, Space release/pause, R retry, Delete remove selection,
   X box-delete tool, E erase.
-- TOUCH BUILDING v3 (build tool, touch only) — PRESS-ADJUST-LIFT: every press
-  previews at the SNAPPED fingertip (loupe magnifies it), sliding re-snaps,
-  LIFT commits — never mid-gesture. Chain: a commit's endpoint becomes the
-  pulsing CHAIN HEAD; the next press previews a beam from it; end the chain by
-  tapping the head, switching tool, the BUILD button, phase change, or undo.
-  Touch snapping uses CONFIG.touch.snapMul (2.0) on node/anchor radii
-  (snapPoint opts: radiusMul/ignoreNodeId/noNodes). Touch build never selects;
-  erase/boxdelete stay on raw finger coords. Mouse/pen fully unchanged.
+- BUILDING v4 — THE REACH CIRCLE (all inputs: mouse, pen, touch): a build
+  gesture may only START on a terrain anchor or an existing design joint (no
+  free starts anywhere). Arming draws a circle of radius material.maxLength
+  (NEVER budget-scaled) that expands ~200 ms; its lit region is
+  snap-then-validate GEOMETRY ONLY (length annulus, build zone, terrain incl.
+  mid-span cut) plus an amber band beyond budgetLeft/costPerMeter. A click
+  anywhere lit commits the girder to the snapped point and THE CIRCLE
+  DISMISSES — nothing stays armed; chaining is just re-arming the fresh
+  joint. Press-drag-release inside the circle commits in one gesture.
+  Outside: anchor/joint re-arms, member selects, empty dismisses; clicking
+  the armed start cancels. Refusals pulse (red = geometry, amber = budget,
+  small local mark = design rules like 'already built'), no hint text except
+  'over budget'. Split authority: snapping.geometryReason() draws the PLACE;
+  validate() (geometry + design rules) judges the MEMBER on click.
+  getBuilder().reach = null | {x, y, nodeId, anchorId, kind, r, rAfford,
+  material, touch, t01, seq, version}; .chainHead mirrors the live circle's
+  centre (always a real anchor/node, always null after a commit);
+  .reachPulse = null | {kind:'bad'|'budget'|'local', x, y, seq}.
+  snapPoint's chainNodeId option is no longer used by any gesture.
 - NODE DRAGGING (mouse + touch): press-and-hold CONFIG.touch.holdMs (350 ms,
   slop holdSlopPx) on a design node lifts it; it follows the snapped pointer
   (anchors/grid only), attached members recompute live with validity; valid

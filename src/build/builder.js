@@ -1,53 +1,72 @@
 // OPUS B owns. Design editing: place/connect/delete/select/ghost/undo.
 // Contract: ARCHITECTURE.md §10. Mutates the design object owned by game.js.
 //
-// MOUSE / PEN — unchanged since v1 (nothing core depends on hover):
-//   press + drag  → ghost member from the snapped start to the snapped end,
-//                   placed on release if valid
-//   press + tap    → select the member under the pointer (or clear the selection)
+// ===========================================================================
+// BUILDING v4 — THE REACH CIRCLE.  ONE model, mouse and touch alike.
+// ===========================================================================
+// The old model refused placements with words: TOO LONG, UNDERGROUND, OUTSIDE
+// BUILD ZONE. Every one of those is a nag about a rule the player could not see.
+// v4 turns the rules into geometry instead, and then the nagging has nothing
+// left to say:
+//
+//   1. STARTS ARE ANCHORED. A build gesture may only START on a terrain anchor
+//      or an existing design joint — i.e. on structure that is transitively
+//      attached to the ground. There is no such thing as a free start on empty
+//      ground any more, on any input. (The first beam of a dam therefore starts
+//      at an anchor, which is also the one true sentence about dams.)
+//   2. ARMING draws THE REACH CIRCLE, centred on that start, of radius
+//      material.maxLength — always, never scaled by money. The part of it a
+//      beam may actually land in is LIT; the rest is dark and hatched
+//      (geometry) or amber (unaffordable). See CONFIG.reach and
+//      snapping.classifyReach — the picture is sampled FROM validate(), so it
+//      cannot disagree with it.
+//   3. COMPLETING: a click/tap anywhere in the circle builds from the armed
+//      start to the SNAPPED point — and THE CIRCLE GOES. One girder, two clicks,
+//      and afterwards nothing is armed at all. A press-drag-release inside the
+//      circle does the same thing in one gesture (desktop speed). Every commit
+//      is one pushUndo.
+//   4. CHAINING IS JUST REPETITION. The endpoint a commit leaves behind is a
+//      real design node, so clicking it arms the next circle. Two clicks per
+//      girder, the same two clicks every time — no sticky state to be in, and
+//      no gesture that means "I am done" because nothing is ever unfinished.
+//   5. Clicks OUTSIDE the circle: on another anchor/joint → arm there instead;
+//      on a member → select it; on empty ground → dismiss the circle. A click on
+//      the armed start itself dismisses it too — that is the cheap "never mind",
+//      not a chain-ending gesture. A click on a REFUSING slice inside the circle
+//      pulses that slice — red for geometry, amber for money — places nothing,
+//      and leaves the circle up, because a refusal should cost one click.
+//
+// What is left of the old vocabulary, unchanged:
 //   right button   → delete the member under the cursor
 //   erase tool     → press/drag deletes every member the path touches
 //   boxdelete tool → press/drag draws a marquee; release deletes the whole
 //                    SECTION inside it as one undo step (a tap falls back to the
 //                    single-member erase, so the tool is never a dead zone)
-// After a placement the far endpoint becomes the "chain node": its snap radius
-// grows (CONFIG.build.chainSnapMul) so a quick follow-up drag continues the run.
+//   NODE DRAGGING (mouse AND touch, build tool): press-and-HOLD on an existing
+//                    design node (CONFIG.touch.holdMs, travel under holdSlopPx)
+//                    lifts it; it follows the snapped pointer with every
+//                    attached member recomputed live, and the release either
+//                    commits the move as ONE undo step or reverts it whole.
 //
-// TOUCH + BUILD TOOL — PRESS-ADJUST-LIFT (v3; CONFIG.touch). v2.4's offset
-// cursor and deferred start are GONE: they moved the target away from the finger
-// and changed the gesture's mind mid-press, and playtest called that clonky. The
-// rule now has no states and no exceptions:
+// Snapping to nodes and anchors is CONFIG.touch.snapMul stronger for a touch
+// gesture (the grid stays 0.5 m), so a fingertip pops onto a joint instead of
+// drifting past it. The loupe (rendering/loupe.js) magnifies the fingertip.
 //
-//   EVERY press previews at the SNAPPED FINGERTIP. Sliding re-snaps the
-//   preview. THE LIFT COMMITS. Nothing else, ever, changes the design.
+// GONE with v2.5: pending chain heads on empty ground, the touchbuild drag
+// mode, and the press-adjust-lift branch that let a grid point start a run.
+// GONE with the chain itself: any state that outlives a commit. The armed start
+// is live only while its circle is, and every commit takes both down.
 //
-// What the preview IS depends only on what already exists:
-//   • CHAIN HEAD live → a BEAM from the head to the snapped fingertip. The lift
-//     places beam + node and the new endpoint becomes the head, so a run is
-//     tap-tap-tap. A tap ON the head finishes the run.
-//   • no head, press on a node/anchor → a beam FROM it (classic drag-draw falls
-//     out of this for free, and a tap adopts the joint as the head instead).
-//   • no head, press on open ground → just the snapped NODE marker; the lift
-//     claims that point as a PENDING head. Pending means "not a design node
-//     yet": an unconnected node is an orphan and the design never holds one.
-// Snapping to nodes and anchors is CONFIG.touch.snapMul stronger for touch (the
-// grid stays 0.5 m), so the preview pops between candidates instead of drifting.
-// The loupe (rendering/loupe.js) shows the fingertip magnified — it, not an
-// offset, is the answer to a finger covering its own target.
-// A press+lift with the build tool NEVER selects: erase and box-delete are the
-// touch deletion tools, and every build press is a placement.
-//
-// NODE DRAGGING (mouse AND touch, build tool): press-and-HOLD on an existing
-// design node (CONFIG.touch.holdMs, travel under holdSlopPx) lifts it. It
-// follows the snapped pointer with every attached member recomputed live, and
-// the release either commits the move as ONE undo step or reverts it whole.
-//
-// The render layer reads B.chainHead and B.nodeDrag (see the state block).
+// The render layer reads B.reach, B.chainHead, B.reachPulse and B.nodeDrag
+// (see the state block).
 
 import { CONFIG } from '../config.js';
 import { on, emit } from '../core/events.js';
 import { getScene } from '../core/game.js';
-import { snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect, hitTol } from './snapping.js';
+import {
+  snapPoint, validate, hitTestMember, hitTestMembersAlong, hitTestMembersInRect, hitTol,
+  reachRadius, affordRadius,
+} from './snapping.js';
 import { MATERIALS, MATERIAL_ORDER } from './materials.js';
 
 const B = {
@@ -64,18 +83,48 @@ const B = {
   nextId: 1,
   undo: [],
   redo: [],
-  chainNodeId: null,      // endpoint of the member just placed (snap radius bonus)
-  chainHead: null,        // TOUCH CHAIN (v3), for the render layer + the HUD:
-                          //   null | {x, y, nodeId|null, anchorId|null, kind,
-                          //           pending}
-                          // the joint the next touch press builds FROM, drawn
-                          // pulsing. `pending` means the point is claimed but is
-                          // not a design node yet (a lone node would be an
-                          // orphan). Set by a committed touch lift, cleared by a
-                          // tap on itself, a tool switch, a phase change,
-                          // undo/redo/clear, or the node under it disappearing.
-                          // Mouse and pen never set it, so a mouse-only session
-                          // never sees one.
+  chainNodeId: null,      // endpoint of the member just placed. v4 arms that
+                          // endpoint outright, so its old job — a wider snap
+                          // radius for starting a follow-up drag near it — is
+                          // gone (see buildDown), and so is the auto re-arm it
+                          // used to feed. It survives in the undo snapshot.
+  chainHead: null,        // THE ARMED START (v4), for the render layer + the HUD:
+                          //   null | {x, y, nodeId|null, anchorId|null, kind}
+                          // the joint the LIVE circle is centred on, and the
+                          // only thing a click inside it can build from. ALWAYS
+                          // a real anchor or a real design node — never a
+                          // claimed point on open ground, which is what v2.5's
+                          // `pending` head was and what v4 deletes outright.
+                          // ALWAYS null once a girder commits: it exists exactly
+                          // as long as B.reach does, never a moment longer.
+                          // Cleared by a commit, a click on itself, a click on
+                          // empty ground outside the circle, a tool switch, a
+                          // phase change, undo/redo/clear, or the node under it
+                          // disappearing.
+  reach: null,            // THE REACH CIRCLE — the armed start as GEOMETRY:
+                          //   null | {x, y, nodeId, anchorId, kind,
+                          //           r, rAfford, material, touch,
+                          //           t01, seq, version}
+                          // r        = material.maxLength (never budget-scaled)
+                          // rAfford  = metres this budget still buys; the amber
+                          //            band is the annulus beyond it
+                          // t01      = expansion progress 0..1, advanced by the
+                          //            RENDERER off its frame counter (the
+                          //            builder owns no clock) and published here
+                          // seq      = bumped on every arm — the renderer
+                          //            restarts the expansion when it changes
+                          // version  = bumped whenever the lit region could have
+                          //            moved (material, budget, design), so the
+                          //            renderer knows to re-sample it
+  reachPulse: null,       // null | {kind:'bad'|'budget'|'local', x, y, seq}
+                          // a click the rules refused. The renderer flashes it
+                          // once — 'bad' = the dark slices (a beam cannot go
+                          // there), 'budget' = the amber band (you cannot afford
+                          // that far), 'local' = a mark at the click itself, for
+                          // the refusals the circle does not draw (already
+                          // built, overlaps a member). Only 'budget' also writes
+                          // to the hint line; otherwise the picture is the whole
+                          // answer.
   nodeDrag: null,         // LIFTED NODE (mouse or touch), for the render layer:
                           //   null | {nodeId, x, y, anchorId, ok, reason,
                           //           touch, orig:{x,y,anchorId}, members:[id]}
@@ -88,6 +137,7 @@ const B = {
 export function getBuilder() { return B; }
 export function getSelection() { return B.selection; }
 export function getChainHead() { return B.chainHead; }
+export function getReach() { return B.reach; }
 export function canUndo() { return B.undo.length > 0; }
 export function canRedo() { return B.redo.length > 0; }
 
@@ -103,6 +153,83 @@ function hint(text) {
   B.hint = { text, until: now() + CONFIG.build.hintMs };
 }
 
+// ---- the armed start + its reach circle -----------------------------------
+//
+// Arming is the whole of v4's state: a start, and the circle that says what it
+// can reach. `seq` restarts the renderer's expansion animation, `version` tells
+// it the LIT REGION may have moved (material, money or design) and must be
+// re-sampled. Neither is a clock — this module owns no frame counter and never
+// will; the renderer advances reach.t01 off its own frame count.
+
+let reachSeq = 0;          // monotonic: one per arm
+let pulseSeq = 0;          // monotonic: one per refused click
+let designSeq = 0;         // monotonic: one per structural edit
+
+function designChanged() { designSeq++; }
+
+// Arm a run at a snapped point. Refuses anything that is not a real anchor or a
+// real design node: v4 has no free starts, so "arm on empty ground" is not a
+// state that can exist rather than one that is merely discouraged.
+function armReach(pt, touch) {
+  if (!pt || (!pt.nodeId && !pt.anchorId)) { disarm(); return false; }
+  const mat = MATERIALS[B.material];
+  B.chainHead = headAt(pt);
+  B.reach = {
+    x: pt.x, y: pt.y,
+    nodeId: pt.nodeId || null,
+    anchorId: pt.anchorId || null,
+    kind: pt.nodeId ? 'node' : 'anchor',
+    r: reachRadius(mat),
+    rAfford: affordRadius(mat, budgetLeft()),
+    material: B.material,
+    touch: !!touch,
+    t01: 0,
+    seq: ++reachSeq,
+    version: 0,
+    designSeq,
+  };
+  B.reachPulse = null;
+  return true;
+}
+
+function disarm() {
+  B.chainHead = null;
+  B.reach = null;
+  B.reachPulse = null;
+}
+
+// Re-measure the live circle. Radius follows the MATERIAL (never the budget —
+// reach is physics); the affordable radius follows the money; the version bumps
+// only when one of those, or the design itself, actually moved, so the renderer
+// re-samples the region when it must and not once per pointer-up.
+function refreshReach() {
+  const rc = B.reach;
+  if (!rc) return;
+  const mat = MATERIALS[B.material];
+  const r = reachRadius(mat);
+  const ra = affordRadius(mat, budgetLeft());
+  if (rc.material === B.material && rc.r === r && rc.rAfford === ra && rc.designSeq === designSeq) return;
+  rc.material = B.material;
+  rc.r = r;
+  rc.rAfford = ra;
+  rc.designSeq = designSeq;
+  rc.version++;
+}
+
+// A click the rules refused, recorded for the renderer to flash once.
+function pulse(kind, x, y) {
+  B.reachPulse = { kind, x, y, seq: ++pulseSeq };
+}
+
+// Is this world point inside the armed circle? The RAW point, not the snapped
+// one: the drawn circle is what the player is aiming at, and a click past its
+// edge means "start a new run over there", not "build a beam to there".
+function inReach(x, y) {
+  const rc = B.reach;
+  if (!rc) return false;
+  return Math.hypot(x - rc.x, y - rc.y) <= rc.r;
+}
+
 // ---- lifecycle ------------------------------------------------------------
 
 export function initBuilder() {
@@ -116,9 +243,9 @@ export function initBuilder() {
   on('ui:delete', () => deleteSelection());
   on('ui:clear', () => clearDesign());
   on('input:key', onKey);
-  // Leaving the build phase ends everything in flight, the chain included: a
-  // pulsing head over a running simulation would be a promise nothing can keep.
-  on('phase:change', ({ phase }) => { if (phase !== 'build') { cancelDrag(); B.chainHead = null; } });
+  // Leaving the build phase ends everything in flight, the armed run included:
+  // a reach circle over a running simulation is a promise nothing can keep.
+  on('phase:change', ({ phase }) => { if (phase !== 'build') { cancelDrag(); disarm(); } });
 }
 
 export function startLevel(level, terrain, design) {
@@ -132,6 +259,8 @@ export function startLevel(level, terrain, design) {
   B.undo = []; B.redo = [];
   B.chainNodeId = null;
   B.chainHead = null;
+  B.reach = null;
+  B.reachPulse = null;
   B.nodeDrag = null;
   B.hint = null;
 }
@@ -190,37 +319,37 @@ export function affordableLength(matId) {
 
 // ---- tools / materials ----------------------------------------------------
 
+// Picking a material never ends a run: it re-sizes the circle the run is
+// standing in. Reach is a property of the material, so switching from timber to
+// cable makes the circle bigger under the player's finger, live, and the amber
+// affordability band moves with it — that IS the material comparison, drawn.
 export function setMaterial(id) {
   if (!MATERIALS[id]) return;
   B.material = id;
   B.tool = 'build';            // picking a material always means "build"
   dropMarquee();
-  if (B.drag && B.drag.mode === 'build' && B.drag.moved && B.drag.last) updateGhost(B.drag.last);
-  // a live touch preview re-costs itself in the new material immediately
-  else if (B.drag && B.drag.mode === 'touchbuild' && B.drag.last) updatePreview(B.drag.last);
+  refreshReach();
+  if (B.drag && B.drag.mode === 'build' && B.drag.last) updateGhost(B.drag.last);
 }
 
 // toggle=true (a UI button) re-sending the active non-build tool turns it off.
 export function setTool(id, toggle) {
   const next = (toggle && id !== 'build' && B.tool === id) ? 'build' : id;
-  // Switching tools ENDS a touch chain: the head is a promise about what the
-  // next press will build, and reaching for the eraser withdraws it. Picking a
+  // Switching tools DISARMS the run: the circle is a promise about what the next
+  // click will build, and reaching for the eraser withdraws it. Picking a
   // material does not (that sets B.tool directly, and is still building).
   //
-  // Pressing the BUILD button itself ends one too, even though the tool does not
+  // Pressing the BUILD button itself disarms too, even though the tool does not
   // change: it is the toolbar's "never mind" — and it is the escape hatch for a
-  // chain whose head has been left somewhere the player can no longer reach
-  // (scrolled off screen, or too far for any legal beam). `toggle` is only true
-  // for a real UI press, so the internal setTool('build') calls do not.
-  if (toggle && next === 'build') B.chainHead = null;
-  if (next !== B.tool) {
-    B.chainHead = null;
-    // A node in the air and a live touch preview both belong to the BUILD tool,
-    // so a tool change abandons them (the node goes back where it was). The
-    // mouse's own build drag is deliberately left alone: it commits on its own
-    // release exactly as it always has.
-    if (B.nodeDrag || (B.drag && B.drag.mode === 'touchbuild')) cancelDrag();
-  }
+  // run armed somewhere the player can no longer reach (scrolled off screen).
+  // `toggle` is only true for a real UI press, so the internal setTool('build')
+  // calls do not.
+  if (toggle && next === 'build') disarm();
+  if (next !== B.tool) disarm();
+  // A node in the air and a live build gesture both belong to a run that has
+  // just been called off, so they are abandoned with it (the node goes back
+  // where it was). A gesture cannot outlive the start it was building from.
+  if (!B.chainHead && (B.nodeDrag || (B.drag && B.drag.mode === 'build'))) cancelDrag();
   B.tool = next;
   if (next !== 'build') B.ghost = null;
   if (next !== 'boxdelete') dropMarquee();   // disarming mid-drag deletes nothing
@@ -268,8 +397,8 @@ function pushUndo() {
 
 // History wins over anything in flight. A live node lift is put BACK before the
 // snapshot is taken (otherwise redo would remember a position the player never
-// committed), and the touch chain is dropped: the design it pointed into has
-// just changed under it.
+// committed), and the armed run is disarmed: the design its circle was drawn
+// against has just changed under it.
 export function undo() {
   if (!B.design || !B.undo.length) return false;
   abortNodeDrag();
@@ -277,7 +406,7 @@ export function undo() {
   if (B.redo.length > CONFIG.build.undoDepth) B.redo.shift();
   restore(B.undo.pop());
   cancelDrag();
-  B.chainHead = null;
+  disarm();
   return true;
 }
 
@@ -288,7 +417,7 @@ export function redo() {
   if (B.undo.length > CONFIG.build.undoDepth) B.undo.shift();
   restore(B.redo.pop());
   cancelDrag();
-  B.chainHead = null;
+  disarm();
   return true;
 }
 
@@ -300,7 +429,7 @@ export function clearDesign() {
   B.design.nodes.length = 0;
   B.selection = null;
   B.chainNodeId = null;
-  B.chainHead = null;
+  disarm();
   cancelDrag();
   return true;
 }
@@ -334,20 +463,23 @@ function cleanupOrphans() {
   // the in-flight ghost may name a node that just disappeared
   if (removed) B.ghost = null;
   if (B.chainNodeId && !nodes.some((n) => n.id === B.chainNodeId)) B.chainNodeId = null;
-  // a chain head or a lifted node whose node is gone is a dangling promise
+  // an armed start or a lifted node whose node is gone is a dangling promise
   if (B.chainHead && B.chainHead.nodeId && !nodes.some((n) => n.id === B.chainHead.nodeId)) {
-    B.chainHead = null;
+    disarm();
   }
   if (B.nodeDrag && !nodes.some((n) => n.id === B.nodeDrag.nodeId)) B.nodeDrag = null;
+  refreshReach();          // the design changed: so did the budget and the region
 }
 
-// `touch` = this placement came from a touch lift, so the far endpoint becomes
-// the CHAIN HEAD and the next press continues the run. Mouse/pen placements
-// leave the chain alone, which in a mouse-only session means there never is one.
-function placeMember(start, end, touch) {
+// The one and only way a member is born. A refusal PULSES the slice the player
+// clicked instead of writing a sentence at them — except for 'over budget',
+// which is the one refusal the circle cannot fully explain on its own (the
+// amber band says where, the hint says how much) and the one the player asked
+// to keep. Returns the member, or null.
+function placeMember(start, end) {
   const mat = MATERIALS[B.material];
   const v = validate(start, end, mat, B.design, B.terrain, B.level, budgetLeft());
-  if (!v.ok) { hint(v.reason); return null; }
+  if (!v.ok) { refuse(v.reason, end); return null; }
 
   pushUndo();
   const a = ensureNode(start);
@@ -357,10 +489,28 @@ function placeMember(start, end, touch) {
   const m = { id: 'm' + B.nextId++, a, b, mat: B.material };
   B.design.members.push(m);
   B.chainNodeId = b;
-  if (touch) B.chainHead = headAt(nodeById(b));
   B.selection = null;
+  designChanged();
   emit('design:change', { action: 'place', id: m.id });
   return m;
+}
+
+// The refusals the CIRCLE cannot show, because they are about the design rather
+// than the place: this beam already exists, or it would leave its neighbour at
+// under minAngleDeg. They are why a click is still checked in full — see
+// snapping.reachGeom for why they are deliberately not drawn.
+const SOCIAL = ['same point', 'already built', 'overlaps a member'];
+
+// A placement the rules refused. `end` is where the player aimed, so the
+// renderer can flash the right thing: the amber band for money, the dark slices
+// for a place a beam cannot go, and — for a refusal with no region of its own —
+// a small mark at the click itself, which is the honest answer to "something
+// said no, but not the ground and not the wallet".
+function refuse(reason, end) {
+  const budget = reason === 'over budget';
+  const kind = budget ? 'budget' : SOCIAL.indexOf(reason) >= 0 ? 'local' : 'bad';
+  pulse(kind, end ? end.x : 0, end ? end.y : 0);
+  if (budget) hint(reason);
 }
 
 export function deleteMember(id) {
@@ -368,6 +518,7 @@ export function deleteMember(id) {
   if (i < 0) return false;
   B.design.members.splice(i, 1);
   if (B.selection === id) B.selection = null;
+  designChanged();
   cleanupOrphans();
   emit('design:change', { action: 'delete', id, count: 1 });
   return true;
@@ -392,6 +543,7 @@ export function deleteMembers(ids) {
     if (want.has(members[i].id)) members.splice(i, 1);
   }
   if (B.selection && want.has(B.selection)) B.selection = null;
+  designChanged();
   cleanupOrphans();
   emit('design:change', { action: 'delete', id: null, count: gone.length });
   return gone.length;
@@ -437,18 +589,22 @@ function dpr() {
 
 // ---- snapping helpers -----------------------------------------------------
 
-// Snap for a TOUCH gesture: same priority as always, node and anchor radii
-// scaled by CONFIG.touch.snapMul so the preview endpoint pops onto joints.
+// The snap options a gesture uses, mouse or touch. Node and anchor radii are
+// CONFIG.touch.snapMul wider for a finger so a joint POPS under it; the grid
+// stays 0.5 m on every input, because a grid is a quantisation, not a target.
 //
-// Deliberately NO chain bonus (CONFIG.build.chainSnapMul). That bonus exists so
-// a MOUSE can start a follow-up drag near the endpoint it just placed; a touch
-// chain already builds from the head by definition, and stacking 1.7 on top of
-// snapMul would give the head a 2 m radius — swallowing every tap that meant
-// "beam to here" and reading it as "tap the head, finish the run" instead. The
-// head keeps the plain node radius, which is also the honest rule: within a
-// node's snap radius, a tap means THAT node.
-function snapTouch(x, y) {
-  return snapPoint(x, y, B.design, B.terrain, { radiusMul: CONFIG.touch.snapMul });
+// Deliberately NO chain bonus (CONFIG.build.chainSnapMul) on the far end of a
+// gesture: that bonus exists to make STARTING near a fresh endpoint forgiving,
+// and stacking 1.7 on top of snapMul would give the armed start a 2 m radius —
+// swallowing every click that meant "beam to here" and reading it as "tap the
+// start, finish the run" instead. Within a node's plain snap radius, a click
+// means THAT node: that is the honest rule and the one the circle draws.
+export function snapOptsFor(touch) {
+  return touch ? { radiusMul: CONFIG.touch.snapMul } : undefined;
+}
+
+function snapAt(x, y, touch) {
+  return snapPoint(x, y, B.design, B.terrain, snapOptsFor(touch));
 }
 
 // Two snapped points that mean the same place. Both are quantised (node /
@@ -466,7 +622,8 @@ function nodeById(id) {
   return null;
 }
 
-// A chain-head record from any snapped point or design node.
+// An armed-start record from any snapped point or design node. There is no
+// 'grid' kind any more: a point that is neither a node nor an anchor cannot arm.
 function headAt(pt) {
   if (!pt) return null;
   const nodeId = pt.id || pt.nodeId || null;
@@ -474,8 +631,7 @@ function headAt(pt) {
     x: pt.x, y: pt.y,
     nodeId,
     anchorId: pt.anchorId || null,
-    kind: nodeId ? 'node' : pt.anchorId ? 'anchor' : (pt.kind || 'grid'),
-    pending: !nodeId,
+    kind: nodeId ? 'node' : 'anchor',
   };
 }
 
@@ -497,27 +653,23 @@ function onDown(p) {
   const eraser = B.tool === 'erase';
   const box = B.tool === 'boxdelete';
 
-  // TOOL CHOICE: only the BUILD tool gets press-adjust-lift. Erase and
-  // box-delete are coarse by nature — a sweep through members, a marquee round a
-  // section — and both are aimed with the whole contact patch, so they keep the
-  // raw fingertip and the original code path, mouse and touch alike.
-  if (p.ptype === 'touch' && !eraser && !box) { touchDown(p); return; }
-
-  const start = (eraser || box) ? null
-    : snapPoint(p.x, p.y, B.design, B.terrain, { chainNodeId: B.chainNodeId });
+  // TOOL CHOICE: erase and box-delete are coarse by nature — a sweep through
+  // members, a marquee round a section — and both are aimed with the whole
+  // contact patch, so they keep the raw pointer and the original code path,
+  // mouse and touch alike. Only the BUILD tool goes through the reach circle.
+  if (!eraser && !box) { buildDown(p); return; }
 
   B.drag = {
-    mode: box ? 'boxdelete' : eraser ? 'erase' : 'build',
-    start,
+    mode: box ? 'boxdelete' : 'erase',
+    start: null,
     px0: p.px, py0: p.py, t0: now(),
     lx: p.x, ly: p.y,
     x0: p.x, y0: p.y,        // marquee origin (box-delete)
-    last: start,
+    last: null,
     snapped: false,
     moved: false,
-    touch: false,
-    // press-and-hold on an existing node lifts it (see holdCheck)
-    holdNodeId: (!eraser && !box && start && start.kind === 'node') ? start.nodeId : null,
+    touch: p.ptype === 'touch',
+    holdNodeId: null,
   };
   B.ghost = null;
   clearMarquee();            // the box only exists once the drag passes dragMinPx
@@ -525,21 +677,58 @@ function onDown(p) {
   if (eraser) eraseAt(p.x, p.y);
 }
 
-// A touch press with the build tool. Nothing is committed and nothing is locked:
-// this only decides what the PREVIEW is, and the preview follows the finger
-// until it lifts.
-function touchDown(p) {
-  const snap = snapTouch(p.x, p.y);
-  const head = B.chainHead;
-  // Where a beam would come FROM: the chain head if a run is live, else the
-  // joint under the finger, else nothing (an open-ground press previews a node).
-  const from = head || ((snap.kind === 'node' || snap.kind === 'anchor') ? snap : null);
+// A build press — THE gesture, identical on mouse, pen and touch. It decides one
+// thing: what is this press FROM? There are exactly four answers, and three of
+// them build nothing.
+//
+//   • inside the armed circle  → the press is a COMPLETION. It previews a beam
+//     from the armed start and commits on release, wherever the pointer has got
+//     to by then (so a tap and a drag are the same gesture at different speeds).
+//   • on an anchor or a joint  → ARM there. A circle already up somewhere else is
+//     replaced: clicking a different foundation means "start over there".
+//   • nothing armed, or the press is outside the circle, and it is not on a
+//     joint → the press cannot build. It dismisses the circle, and on release a
+//     tap selects whatever member is under it.
+//
+// Nothing is committed here and nothing is locked in: a press only ever chooses
+// a preview.
+function buildDown(p) {
+  const touch = p.ptype === 'touch';
+  // Deliberately the SAME snap the release and the renderer's region sampling
+  // use — no chainNodeId bonus anywhere in a build gesture. That bonus existed
+  // so a mouse could START a follow-up drag near the endpoint it had just
+  // placed; v4 has already armed that endpoint, so all the bonus could do now
+  // is give the armed start a 1 m radius and swallow every click that meant
+  // "beam to here". It would also make the down-snap differ from the snap the
+  // circle was drawn with, and then a lit point could refuse — which is the one
+  // thing this model may never do.
+  const snap = snapAt(p.x, p.y, touch);
+  const joint = (snap.nodeId || snap.anchorId) ? snap : null;
+  const armed = !!B.chainHead;
+  const inside = armed && inReach(p.x, p.y);
+
+  let from = null;
+  let fresh = false;
+  if (armed && inside) {
+    from = B.chainHead;
+    // the drawn region must snap the way THIS gesture snaps: a circle armed by
+    // mouse and then pressed by a finger has to be re-sampled with the fatter
+    // touch radii, or the picture would answer a question nobody asked
+    if (B.reach && B.reach.touch !== touch) { B.reach.touch = touch; B.reach.version++; }
+  } else if (joint) {
+    armReach(joint, touch);
+    from = B.chainHead;
+    fresh = true;
+  } else if (armed) {
+    disarm();                                // outside, on empty or on a member
+  }
 
   B.drag = {
-    mode: 'touchbuild',
-    touch: true,
+    mode: 'build',
+    touch,
     start: from,             // named `start` so cleanupOrphans keeps protecting it
     from,
+    fresh,                   // this press is what armed the circle
     px0: p.px, py0: p.py, t0: now(),
     lx: p.x, ly: p.y,
     x0: p.x, y0: p.y,
@@ -553,7 +742,7 @@ function touchDown(p) {
   // Publish the snap immediately: on the very first contact the snap ring IS
   // the answer to "where will this land?", and the loupe magnifies it.
   B.hover = { x: p.x, y: p.y, snap };
-  updatePreview(snap);
+  updateGhost(snap);
 }
 
 // ---- pointer move ---------------------------------------------------------
@@ -566,7 +755,8 @@ function onMove(p) {
 
   if (!B.drag) {                                  // hover (mouse only, cosmetic)
     if (p.hover) {
-      B.hover = { x: p.x, y: p.y, snap: snapPoint(p.x, p.y, B.design, B.terrain, { chainNodeId: B.chainNodeId }) };
+      // the hover mark shows exactly where a click would land: same snap, no bonus
+      B.hover = { x: p.x, y: p.y, snap: snapAt(p.x, p.y, false) };
       const del = B.tool === 'erase' || B.tool === 'boxdelete';
       B.hoverMember = hitTestMember(p.x, p.y, B.design, tolerance(del ? CONFIG.build.eraseTolMul : 1));
     }
@@ -598,31 +788,11 @@ function onMove(p) {
   // after the hold, which is also the first moment the node has anywhere to go.
   if (B.drag.holdNodeId && holdCheck(travel)) { nodeDragMove(p); return; }
 
-  if (B.drag.mode === 'touchbuild') { touchMove(p); return; }
-
-  if (!B.drag.moved) { B.ghost = null; return; }
-  // no chain bonus on the far end: that radius exists to make STARTING a
-  // follow-up drag forgiving, and would otherwise pull short members back home
-  const end = snapPoint(p.x, p.y, B.design, B.terrain);
+  // Sliding only ever re-snaps the preview: adjust, then release. The far end
+  // takes no chain bonus (see snapOptsFor).
+  const end = snapAt(p.x, p.y, B.drag.touch);
   B.drag.last = end;
   B.hover.snap = end;
-  updateGhost(end);
-}
-
-// Sliding a touch press only ever re-snaps the preview: adjust, then lift.
-function touchMove(p) {
-  const snap = snapTouch(p.x, p.y);
-  B.drag.last = snap;
-  B.hover = { x: p.x, y: p.y, snap };
-  updatePreview(snap);
-}
-
-// The preview under a live touch press: a beam from the gesture's origin to the
-// snapped fingertip, or — with no origin, or while the beam would be a
-// zero-length stub — nothing but the snap mark the renderer draws from B.hover.
-function updatePreview(end) {
-  const from = B.drag && B.drag.from;
-  if (!from || samePoint(from, end)) { B.ghost = null; return; }
   updateGhost(end);
 }
 
@@ -650,53 +820,67 @@ function onUp(p) {
     return;
   }
 
-  if (p.cancel) { cleanupOrphans(); return; }     // pinch-cancel: never place
+  // pinch-cancel: never place, never select — and the armed start survives, so a
+  // two-finger pan mid-run costs the player nothing.
+  if (p.cancel) { cleanupOrphans(); return; }
 
-  if (drag.mode === 'touchbuild') { touchCommit(p, drag); cleanupOrphans(); return; }
-
-  const cfg = CONFIG.build;
-  const travel = Math.hypot(p.px - drag.px0, p.py - drag.py0);
-  const held = now() - drag.t0;
-
-  if (travel <= cfg.tapMaxPx && held <= cfg.tapMaxMs) {          // tap = select
-    B.selection = hitTestMember(p.x, p.y, B.design, tolerance());
-    cleanupOrphans();
-    return;
-  }
-  if (travel < cfg.dragMinPx) { cleanupOrphans(); return; }      // long hold: no-op
-
-  const end = (ghost && ghost.end) || snapPoint(p.x, p.y, B.design, B.terrain, { chainNodeId: B.chainNodeId });
-  placeMember(drag.start, end);
+  buildCommit(p, drag, ghost);
   cleanupOrphans();
 }
 
-// THE commit point of touch building: the finger has left the glass, and where
-// it left is what gets built. Four outcomes, in this order:
-//   1. a TAP on the chain head finishes the run (this is the "done" gesture);
-//   2. a press that had no origin claims its lift point as a PENDING head;
-//   3. a beam that would be a stub either adopts its joint as the head (so a
-//      tap on existing work starts a run) or does nothing;
-//   4. otherwise: place the beam, and the far end becomes the head.
-// An invalid beam hints and places nothing — and leaves the chain exactly as it
-// was, so a refusal costs the player a tap, not their run.
-function touchCommit(p, drag) {
-  const end = snapTouch(p.x, p.y);
-  const tap = Math.hypot(p.px - drag.px0, p.py - drag.py0) <= CONFIG.touch.tapMaxPx * dpr();
-  const head = B.chainHead;
+// THE commit point, mouse and touch alike: the pointer has left, and where it
+// left is what gets built. In order:
+//   1. no armed start under this press → a TAP selects the member under it (and
+//      an empty tap clears the selection). This is the only gesture in v4 that
+//      is not about building, and it is why touch can select again at all: a
+//      press on empty ground no longer places anything, so it is free to mean
+//      something else.
+//   2. released back ON the armed start → dismiss the circle, unless this same
+//      press is what armed it (arming and dismissing on one click would make the
+//      circle un-openable). This is "never mind", not "I have finished": after a
+//      commit there is nothing armed to say it to.
+//   3. otherwise → build from the armed start to the snapped release point, and
+//      the circle goes with the girder. If the rules refuse it, the slice PULSES
+//      and the circle stays up: a refusal costs the player a click, not a
+//      re-arm.
+function buildCommit(p, drag, ghost) {
+  const travel = Math.hypot(p.px - drag.px0, p.py - drag.py0);
+  const tapMax = drag.touch ? CONFIG.touch.tapMaxPx * dpr() : CONFIG.build.tapMaxPx;
+  const tap = travel <= tapMax;
 
-  if (head && tap && samePoint(head, end)) { B.chainHead = null; return; }
-  if (!drag.from) { B.chainHead = headAt(end); return; }
-  if (samePoint(drag.from, end)) {
-    if (!head && tap) B.chainHead = headAt(drag.from);
+  if (!drag.from) {
+    if (tap) B.selection = hitTestMember(p.x, p.y, B.design, tolerance());
     return;
   }
-  placeMember(drag.from, end, true);
+
+  const end = (ghost && ghost.end) || snapAt(p.x, p.y, drag.touch);
+
+  if (samePoint(drag.from, end)) {
+    if (tap && !drag.fresh) disarm();
+    return;
+  }
+  commit(drag.from, end);
 }
 
+// Place a beam — and take the circle down with it. The gesture is OVER: the
+// girder exists, and the player is not mid-anything. What used to be a chain is
+// now just the next two clicks, starting on the joint this one left behind, and
+// that is worth more than the saved tap: there is no state to be in, so there is
+// no state to get out of, and every girder is built the same way as the first.
+// A refusal is the one thing that does NOT dismiss (see placeMember → refuse).
+function commit(from, end) {
+  const m = placeMember(from, end);
+  if (m) disarm();
+  return m;
+}
+
+// The live preview beam. Null when there is nothing to build from, or while the
+// beam would be a zero-length stub (a press that has not left its own start yet
+// is not a refusal, it is a press) — the renderer falls back to the snap mark.
 function updateGhost(end) {
-  const start = B.drag.start;
+  const start = B.drag && B.drag.from;
   const mat = MATERIALS[B.material];
-  if (!start || !mat) { B.ghost = null; return; }
+  if (!start || !mat || samePoint(start, end)) { B.ghost = null; return; }
   const v = validate(start, end, mat, B.design, B.terrain, B.level, budgetLeft());
   const len = Math.hypot(end.x - start.x, end.y - start.y);
   B.ghost = {
@@ -823,6 +1007,8 @@ function finishNodeDrag(p) {
   pushUndo();
   n.x = to.x; n.y = to.y; n.anchorId = to.anchorId;
   syncChainHead(n);
+  designChanged();
+  refreshReach();
   emit('design:change', { action: 'move', id: nd.nodeId });
 }
 
@@ -841,11 +1027,14 @@ function abortNodeDrag() {
   if (n) putNodeBack(n, nd);
 }
 
-// The chain head is a COPY of a point, so a node that moves takes its head with
-// it (and a head naming a node that died is dropped in cleanupOrphans).
+// The armed start is a COPY of a point, so a node that moves takes its start —
+// and the circle drawn around it — with it. (A start naming a node that died is
+// dropped in cleanupOrphans.)
 function syncChainHead(n) {
   const h = B.chainHead;
   if (h && h.nodeId === n.id) { h.x = n.x; h.y = n.y; h.anchorId = n.anchorId || null; }
+  const rc = B.reach;
+  if (rc && rc.nodeId === n.id) { rc.x = n.x; rc.y = n.y; rc.anchorId = n.anchorId || null; }
 }
 
 // ---- eraser ---------------------------------------------------------------

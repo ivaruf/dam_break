@@ -17,10 +17,12 @@
 // its own pass. That is the only cross-file coupling in the render stack.
 
 import { CONFIG } from '../config.js';
-import { getBuilder } from '../build/builder.js';
+import { getBuilder, budgetLeft, snapOptsFor } from '../build/builder.js';
+import { classifyReachGeom, REACH_BAD } from '../build/snapping.js';
 import { MATERIALS } from '../build/materials.js';
 
 const R = CONFIG.render;
+const RE = CONFIG.reach;
 const TAU = Math.PI * 2;
 
 // ---- frame transform state (module-level to avoid per-call allocation) ----
@@ -53,6 +55,7 @@ export function init() {
   skyGrad = null; hazeGrad = null; soilGrad = null;
   hillId = null; terrainId = null;
   resetCreep();
+  resetReach();
 }
 
 // ---- small deterministic helpers -----------------------------------------
@@ -247,7 +250,13 @@ export function render(ctx, cam, S) {
     drawDesign(ctx, S.design);
   }
 
-  if (build) { drawGhost(ctx); drawMarquee(ctx); drawChainHead(ctx); drawLiftedNode(ctx); }
+  if (build) {
+    drawReach(ctx, S);
+    drawGhost(ctx);
+    drawMarquee(ctx);
+    drawChainHead(ctx);
+    drawLiftedNode(ctx);
+  }
 
   ctx.restore();
 }
@@ -1178,24 +1187,366 @@ function drawGhost(ctx) {
   if (g.start) snapMark(ctx, g.start, 1);
   if (g.end) snapMark(ctx, g.end, 1);
 
-  // floating label: length + cost, or why it is refused
-  const txt = g.ok
-    ? g.len.toFixed(1) + ' m  ·  $' + Math.round(g.cost)
-    : (g.reason ? String(g.reason).toUpperCase() : 'CANNOT BUILD');
-  labelAt(ctx, txt, SX(g.x1), SY(g.y1) - 20 * dpr, g.ok ? R.ghostOk : R.ghostBad, false);
+  // Floating label: length and cost, and NOTHING ELSE. Building v4 deleted the
+  // refusal text on purpose — TOO LONG / UNDERGROUND / OUTSIDE BUILD ZONE were
+  // sentences about rules the player could not see, and the reach circle now
+  // shows all three as shapes. A geometry refusal is simply a red ghost inside a
+  // dark slice; it needs no caption.
+  //
+  // The ONE exception is money, because the amber band can say WHERE the budget
+  // runs out but not by how much: over budget keeps its number and prints it in
+  // the danger colour, so "$310" reads as the problem it is.
+  const budget = !g.ok && g.reason === 'over budget';
+  if (g.ok || budget) {
+    labelAt(ctx, g.len.toFixed(1) + ' m  ·  $' + Math.round(g.cost),
+      SX(g.x1), SY(g.y1) - 20 * dpr, budget ? RE.budgetColor : R.ghostOk, false);
+  }
 }
 
-// ---- touch building v3: chain head + lifted node ------------------------
+// ---- BUILDING v4: THE REACH CIRCLE --------------------------------------
+//
+// The rule the builder enforces, drawn. Arming a start spawns a circle of
+// radius material.maxLength (reach is physics — it never shrinks because the
+// player is short of money) and the inside of it is painted with what a click
+// there would do:
+//
+//   lit green   a beam lands here
+//   dark+hatch  the PLACE refuses: the minimum span, the build zone, the ground
+//               under the endpoint, a hill the beam would cut through
+//   amber       the place is fine and the WALLET is not — everything beyond
+//               budgetLeft / costPerMeter
+//
+// WHAT IT DOES NOT DRAW is as important. It asks snapping.reachGeom, not
+// validate(), so refusals that are about the DESIGN rather than the place —
+// already built, overlaps a member, same point — never darken it. Painting
+// those put a dark blotch on every joint the player had built, and they were
+// usually lying about the click anyway: a tap near a joint SNAPS onto it and
+// places a legal member. The circle answers "can a beam go there"; the click
+// still checks everything, and the few genuine social refusals get the red
+// pulse. (Every sample is snapped first, exactly like a click, so the picture
+// answers the question the player is actually asking.)
+//
+// HOW it is drawn matters too. Along each ray out from the start the legal band
+// is found once and its ends BISECTED, then the ends of neighbouring rays are
+// joined into one continuous polygon. So the edge of the build zone comes out as
+// a straight line through points that are exactly on it, the ground edge follows
+// the ground, and the hatch is one continuous set of stripes clipped to one
+// smooth path — instead of a staircase of per-sample tiles. Nothing is ever
+// painted outside the circle: the expansion itself is a clip.
+//
+// The sampling happens once per arm (and again only when reach.version says the
+// region could have moved — material, budget, design). Everything animated here
+// is a function of the renderer's own frame COUNT, never a clock.
+
+const reachCache = { key: '', A: 0, cos: null, sin: null, bands: null, valid: null, budget: null };
+const reachAnim = { seq: -1, frame0: 0 };
+const pulseAnim = { seq: -1, frame0: 0 };
+
+// milliseconds → frames at the 60 Hz the whole game is written against
+function animFrames(ms) { return Math.max(1, Math.round(ms * 0.06)); }
+
+export function resetReach() {
+  reachCache.key = ''; reachAnim.seq = -1; pulseAnim.seq = -1;
+  reachGone.live = false; reachGone.frame = -999; reachGone.r = 0;
+}
+
+// The legal radial bands along one ray, as [u0, u1] pairs in units of the
+// circle's radius. Bisection places each end within r/(K·2^bis) — about four
+// millimetres on a 5 m circle — so a boundary is drawn where the boundary is,
+// not on the nearest sampling ring.
+function scanRay(rc, S, mat, opts, left, ux, uy) {
+  const K = Math.max(4, CONFIG.reach.radiusSteps | 0);
+  const BIS = Math.max(0, CONFIG.reach.bisectSteps | 0);
+  const start = { x: rc.x, y: rc.y, nodeId: rc.nodeId, anchorId: rc.anchorId, kind: rc.kind };
+  const legal = (u) => classifyReachGeom(start, rc.x + ux * u * rc.r, rc.y + uy * u * rc.r,
+    mat, S.design, S.terrain, S.level, left, opts) !== REACH_BAD;
+  const edge = (lo, hi, loLegal) => {
+    for (let b = 0; b < BIS; b++) {
+      const mid = (lo + hi) * 0.5;
+      if (legal(mid) === loLegal) lo = mid; else hi = mid;
+    }
+    return (lo + hi) * 0.5;
+  };
+
+  const out = [];
+  let prevU = 0, prev = legal(0.5 / K);
+  let from = prev ? 0 : -1;
+  for (let k = 1; k < K; k++) {
+    const u = (k + 0.5) / K;
+    const now = legal(u);
+    if (now !== prev) {
+      const b = edge(prevU, u, prev);
+      if (now) from = b; else { out.push(from < 0 ? 0 : from, b); from = -1; }
+    }
+    prev = now; prevU = u;
+  }
+  if (prev) out.push(from < 0 ? 0 : from, 1);
+  return out;
+}
+
+// Turn per-ray intervals into closed polygons, in units of the circle radius and
+// relative to its centre. Each polygon is a flat [x,y,...] loop; a band that
+// runs the whole way round comes back as two loops (outer forward, inner
+// backward) so the middle is a hole under nonzero winding.
+function polysFrom(ivs, A, cos, sin, lo, hi, out) {
+  let maxBands = 0;
+  for (let a = 0; a < A; a++) maxBands = Math.max(maxBands, ivs[a].length >> 1);
+
+  for (let b = 0; b < maxBands; b++) {
+    // clamp this band to [lo, hi] (the affordability split); absent or empty
+    // after clamping counts as "this ray has nothing here"
+    const r0 = new Float64Array(A), r1 = new Float64Array(A);
+    const has = new Uint8Array(A);
+    for (let a = 0; a < A; a++) {
+      const iv = ivs[a];
+      if (iv.length < (b + 1) * 2) continue;
+      const a0 = Math.max(iv[b * 2], lo), a1 = Math.min(iv[b * 2 + 1], hi);
+      if (a1 - a0 <= 1e-4) continue;
+      r0[a] = a0; r1[a] = a1; has[a] = 1;
+    }
+
+    let n = 0;
+    for (let a = 0; a < A; a++) n += has[a];
+    if (!n) continue;
+
+    if (n === A) {                                  // a full ring: two loops
+      const outer = [], inner = [];
+      for (let a = 0; a < A; a++) { outer.push(cos[a] * r1[a], sin[a] * r1[a]); }
+      for (let a = A - 1; a >= 0; a--) { inner.push(cos[a] * r0[a], sin[a] * r0[a]); }
+      out.push(outer, inner);
+      continue;
+    }
+
+    // otherwise walk the circle from a gap, so no run ever wraps
+    let s = 0;
+    while (s < A && has[s]) s++;
+    for (let i = 0; i < A; i++) {
+      const a = (s + i) % A;
+      if (!has[a]) continue;
+      const run = [];
+      let j = i;
+      while (j < A && has[(s + j) % A]) { run.push((s + j) % A); j++; }
+      i = j - 1;
+      const poly = [];
+      for (const q of run) poly.push(cos[q] * r1[q], sin[q] * r1[q]);
+      for (let k = run.length - 1; k >= 0; k--) {
+        const q = run[k];
+        poly.push(cos[q] * r0[q], sin[q] * r0[q]);
+      }
+      out.push(poly);
+    }
+  }
+}
+
+function reachRegion(rc, S) {
+  const key = rc.seq + ':' + rc.version;
+  if (reachCache.key === key && reachCache.bands) return reachCache;
+  const A = Math.max(8, CONFIG.reach.angleSteps | 0);
+  const mat = MATERIALS[rc.material];
+  const opts = snapOptsFor(rc.touch);          // the gesture's own snap, exactly
+  const left = budgetLeft();
+
+  const cos = new Float64Array(A), sin = new Float64Array(A);
+  const ivs = new Array(A);
+  for (let a = 0; a < A; a++) {
+    const th = ((a + 0.5) / A) * TAU;
+    const ux = Math.cos(th), uy = Math.sin(th);
+    cos[a] = ux; sin[a] = -uy;                 // world y-up → screen y-down
+    ivs[a] = scanRay(rc, S, mat, opts, left, ux, uy);
+  }
+
+  // the affordability split, as a fraction of the radius
+  const aff = rc.rAfford > 0 ? Math.min(1, rc.rAfford / rc.r) : 0;
+  const bands = [], valid = [], budget = [];
+  polysFrom(ivs, A, cos, sin, 0, 1, bands);
+  polysFrom(ivs, A, cos, sin, 0, aff, valid);
+  if (aff < 1) polysFrom(ivs, A, cos, sin, aff, 1, budget);
+
+  reachCache.key = key; reachCache.A = A;
+  reachCache.cos = cos; reachCache.sin = sin;
+  reachCache.bands = bands; reachCache.valid = valid; reachCache.budget = budget;
+  return reachCache;
+}
+
+function addLoops(ctx, loops, cx0, cy0, unit) {
+  for (const loop of loops) {
+    if (loop.length < 6) continue;
+    ctx.moveTo(cx0 + loop[0] * unit, cy0 + loop[1] * unit);
+    for (let i = 2; i < loop.length; i += 2) {
+      ctx.lineTo(cx0 + loop[i] * unit, cy0 + loop[i + 1] * unit);
+    }
+    ctx.closePath();
+  }
+}
+
+// Diagonal hatch over whatever is currently clipped. Colour is one channel; a
+// texture is another, and "dark" alone reads as shadow rather than as refusal.
+function hatchCircle(ctx, cx0, cy0, r) {
+  const gap = Math.max(3, CONFIG.reach.hatchGapPx * dpr);
+  ctx.beginPath();
+  for (let x = cx0 - r * 2; x < cx0 + r * 2; x += gap) {
+    ctx.moveTo(x, cy0 + r);
+    ctx.lineTo(x + r * 2, cy0 - r);
+  }
+  ctx.strokeStyle = RE.hatchColor;
+  ctx.lineWidth = Math.max(1, RE.hatchPx * dpr);
+  ctx.stroke();
+}
+
+// The circle that just went. Purely decorative: when a girder commits (or the
+// player dismisses the circle) the rim contracts and fades over a few frames, so
+// the gesture ENDS visibly instead of the circle blinking out of existence. Only
+// the rim — the lit region belonged to a design that has already changed, and
+// re-drawing it for a tenth of a second would be drawing something untrue.
+const reachGone = { x: 0, y: 0, r: 0, frame: -999, live: false };
+
+function drawReachFade(ctx) {
+  const t = (frames - reachGone.frame) / animFrames(RE.fadeMs);
+  if (!(t >= 0 && t < 1) || !(reachGone.r > 0)) return;
+  const px = SX(reachGone.x), py = SY(reachGone.y);
+  const r = reachGone.r * zoom * (1 - t * 0.35);
+  if (r < RE.minPx * dpr) return;
+  ctx.save();
+  ctx.globalAlpha = RE.edgeAlpha * (1 - t);
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, TAU);
+  ctx.strokeStyle = RE.okColor;
+  ctx.lineWidth = Math.max(1, RE.edgePx * dpr);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawReach(ctx, S) {
+  const B = getBuilder();
+  const rc = B && B.reach;
+  if (!rc || B.tool !== 'build' || B.nodeDrag) {
+    // the frame the circle disappeared on: start the contraction
+    if (reachGone.live) { reachGone.live = false; reachGone.frame = frames; }
+    drawReachFade(ctx);
+    return;
+  }
+  if (!isFinite(rc.x) || !isFinite(rc.y) || !(rc.r > 0)) return;
+  if (!S.design || !S.terrain) return;
+  reachGone.live = true;
+  reachGone.x = rc.x; reachGone.y = rc.y; reachGone.r = rc.r;
+
+  // expansion: deterministic, off the frame counter, restarted by rc.seq
+  if (reachAnim.seq !== rc.seq) { reachAnim.seq = rc.seq; reachAnim.frame0 = frames; }
+  const u = clamp01((frames - reachAnim.frame0) / animFrames(RE.animMs));
+  const e = 1 - (1 - u) * (1 - u) * (1 - u);                // ease-out cubic
+  rc.t01 = e;                                               // published (contract §10)
+
+  const cx0 = SX(rc.x), cy0 = SY(rc.y);
+  const full = rc.r * zoom;
+  const cur = full * e;
+  if (cur < RE.minPx * dpr) return;
+  if (cx0 + cur < 0 || cx0 - cur > W || cy0 + cur < 0 || cy0 - cur > H) return;
+
+  const cache = reachRegion(rc, S);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx0, cy0, cur, 0, TAU);            // the expansion IS a clip: the
+  ctx.clip();                                // region itself never distorts
+
+  // 1. what refuses: the circle with the legal bands punched out of it. One
+  //    path, so the hatch clipped to it is one continuous set of stripes.
+  ctx.beginPath();
+  ctx.arc(cx0, cy0, full, 0, TAU);
+  addLoops(ctx, cache.bands, cx0, cy0, full);
+  ctx.globalAlpha = RE.invalidAlpha;
+  ctx.fillStyle = RE.invalidColor;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.globalAlpha = 1;
+  hatchCircle(ctx, cx0, cy0, cur);
+  ctx.restore();
+
+  // 2. what a beam can reach and the wallet can pay for
+  if (cache.valid.length) {
+    ctx.beginPath();
+    addLoops(ctx, cache.valid, cx0, cy0, full);
+    ctx.globalAlpha = RE.fillAlpha;
+    ctx.fillStyle = RE.okColor;
+    ctx.fill();
+  }
+  // 3. …and what it can reach but cannot afford
+  if (cache.budget.length) {
+    ctx.beginPath();
+    addLoops(ctx, cache.budget, cx0, cy0, full);
+    ctx.globalAlpha = RE.budgetAlpha;
+    ctx.fillStyle = RE.budgetColor;
+    ctx.fill();
+  }
+
+  drawReachPulse(ctx, B, cache, cx0, cy0, full);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // the rim of what can be reached at all …
+  ctx.save();
+  ctx.globalAlpha = RE.edgeAlpha;
+  ctx.beginPath();
+  ctx.arc(cx0, cy0, cur, 0, TAU);
+  ctx.strokeStyle = RE.okColor;
+  ctx.lineWidth = Math.max(1, RE.edgePx * dpr);
+  ctx.stroke();
+  // … and, inside it, the line the money runs out on. Two different refusals,
+  // two different lines: one solid and green-edged, one dashed and amber.
+  const afford = rc.rAfford * zoom;
+  if (isFinite(afford) && afford < full && afford <= cur && afford > 1) {
+    ctx.globalAlpha = RE.budgetEdgeAlpha;
+    ctx.setLineDash(RE.budgetDash);
+    ctx.beginPath();
+    ctx.arc(cx0, cy0, afford, 0, TAU);
+    ctx.strokeStyle = RE.budgetColor;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// A click the rules refused, flashed once and faded. Three shapes for three
+// different sentences, and no text for any of them:
+//   'bad'     the dark slices go red — a beam cannot GO there
+//   'budget'  the amber band flares — you cannot AFFORD that far
+//   'local'   a small red mark at the click — something else said no (this beam
+//             already exists, or it would lie on top of its neighbour). It has
+//             no region because the circle does not draw refusals about the
+//             design, so the honest answer is to point at the click itself.
+function drawReachPulse(ctx, B, cache, cx0, cy0, full) {
+  const p = B.reachPulse;
+  if (!p) return;
+  if (pulseAnim.seq !== p.seq) { pulseAnim.seq = p.seq; pulseAnim.frame0 = frames; }
+  const t = (frames - pulseAnim.frame0) / animFrames(RE.pulseMs);
+  if (t > 1) return;
+  ctx.beginPath();
+  if (p.kind === 'budget') {
+    if (!cache.budget.length) return;
+    addLoops(ctx, cache.budget, cx0, cy0, full);
+  } else if (p.kind === 'local') {
+    if (!isFinite(p.x) || !isFinite(p.y)) return;
+    ctx.arc(SX(p.x), SY(p.y), Math.max(RE.localPulseM * zoom, 6 * dpr) * (0.6 + 0.4 * t), 0, TAU);
+  } else {
+    ctx.arc(cx0, cy0, full, 0, TAU);
+    addLoops(ctx, cache.bands, cx0, cy0, full);
+  }
+  ctx.globalAlpha = RE.pulseAlpha * (1 - t);
+  ctx.fillStyle = p.kind === 'budget' ? RE.budgetPulseColor : RE.badPulseColor;
+  ctx.fill();
+}
+
+// ---- the armed start + the lifted node ----------------------------------
 //
 // Both are read from getBuilder() and nowhere else: the builder owns what the
 // gesture MEANS, this file only says what it looks like.
 
-// The joint the next touch press will build from. It pulses because it is the
-// one mark on screen that is a PROMISE rather than a fact — and because it is
-// also the button that ends the run ("tap the glowing joint to finish"). Drawn
-// even when the head is PENDING, i.e. a point the player has claimed that is
-// not a design node yet: without this, the first tap of a chain would appear to
-// do nothing at all.
+// The joint the live circle is drawn from. It does NOT pulse: a pulse is a
+// promise about a future gesture, and v4 has none to make — the circle in front
+// of it already says everything, and after a commit there is no armed start at
+// all. So this is a plain steady ring marking the centre of what is on screen,
+// and the solid core is what makes an anchor-armed start (which has no design
+// node on it yet) visible at all.
 function drawChainHead(ctx) {
   const B = getBuilder();
   const h = B && B.chainHead;
@@ -1204,8 +1555,7 @@ function drawChainHead(ctx) {
   const pad = 40 * dpr;
   if (px < -pad || px > W + pad || py < -pad || py > H + pad) return;
 
-  const breath = Math.sin((frames % R.chainHeadPulseFrames) / R.chainHeadPulseFrames * TAU);
-  const r = R.chainHeadPx * dpr * (1 + R.chainHeadPulse * breath);
+  const r = R.chainHeadPx * dpr;
 
   ctx.save();
   ctx.globalAlpha = R.chainHeadAlpha;
@@ -1214,7 +1564,7 @@ function drawChainHead(ctx) {
   ctx.strokeStyle = R.chainHeadColor;
   ctx.lineWidth = Math.max(1.5, R.chainHeadLinePx * dpr);
   ctx.stroke();
-  // solid core: a pending head is not in design.nodes, so nothing else draws it
+  // solid core: an anchor with no node on it yet is drawn by nothing else
   ctx.beginPath();
   ctx.arc(px, py, Math.max(1.6, R.nodePx * dpr * 0.85), 0, TAU);
   ctx.fillStyle = R.chainHeadColor;

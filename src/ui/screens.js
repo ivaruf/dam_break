@@ -22,10 +22,13 @@ function show(id) {
 
 const TUTORIAL = [
   {
-    title: 'Tap or drag to build',
-    text: 'Tap a yellow anchor, then tap where the beam should end — keep tapping to ' +
-      'chain beams, and tap the glowing joint to finish. (A drag works too.) Anchors ' +
-      'are the only places a dam can grip the ground; the \u2922-style button zooms to the build site.',
+    title: 'Tap an anchor, then tap in the circle',
+    text: 'Every beam starts on a yellow anchor or a joint you have already built. ' +
+      'Tap one and a circle appears: everywhere lit inside it is somewhere this beam ' +
+      'can reach. Tap anywhere lit and the beam is built. Two taps, every time — to ' +
+      'keep going, tap the joint you just made. (A drag does the same in one go.) ' +
+      'Dark means the ground or the zone is in the way; amber means you cannot afford ' +
+      'that far. The \u2922-style button zooms to the build site.',
   },
   {
     title: 'Triangles hold, squares fold',
@@ -297,7 +300,7 @@ function coaching(cause) {
   if (c.indexOf('COMPRESSION') >= 0) return 'Something was crushed. Shorten the span or brace it — long beams buckle.';
   if (c.indexOf('COLLAPSE') >= 0) return 'One failure took the rest with it. Triangulate so no single beam is critical.';
   if (c.indexOf('SLID') >= 0) return 'The dam moved bodily. Tie it to anchors on both banks.';
-  if (c.indexOf('NOTHING WAS BUILT') >= 0) return 'Drag between two anchors to place your first beam.';
+  if (c.indexOf('NOTHING WAS BUILT') >= 0) return 'Tap an anchor, then tap inside the circle to place your first beam.';
   if (c.indexOf('RETAINED') >= 0) return 'Close. Seal the leaks and raise the crest a little.';
   if (c.indexOf('FLOODED DOWNSTREAM') >= 0) return 'The village took water. Route the overflow away from it.';
   return '';

@@ -284,6 +284,59 @@ export const CONFIG = {
     },
   },
 
+  // ---- BUILDING v4: THE REACH CIRCLE (Fable) ----------------------------
+  // Every placement constraint, turned into visible geometry. Arming a start
+  // (a click/tap on an anchor or an existing joint) spawns a circle centred
+  // there whose radius is ALWAYS the material's maxLength — reach is physics,
+  // and physics does not get cheaper when you are broke. Inside it:
+  //   • the LIT region is exactly the set of points whose snapped position
+  //     validate() would accept — drawn translucent green;
+  //   • geometry refusals (too short, underground, through the ground, outside
+  //     the zone, duplicate, overlap) are DARK and hatched: "physics says no";
+  //   • money refusals are a distinct AMBER band beyond budgetLeft/costPerMeter:
+  //     "the wallet says no". The two must never be confusable.
+  // The region is sampled on a polar grid through snapping.classifyReach(), so
+  // the picture cannot disagree with the rule it is drawing.
+  reach: {
+    animMs: 200,           // expansion of a freshly armed circle …
+    fadeMs: 160,           // … and the contraction of the rim when the girder
+                           // commits and the circle goes. Both decorative and
+                           // frame-counter driven (renderer.js) — never a clock,
+                           // so two runs of a level draw the same frames.
+    angleSteps: 96,        // rays out from the armed start (3.75° apart) …
+    radiusSteps: 20,       // … each cut into this many rings to FIND the legal
+                           // band, then bisected this many times to place its
+    bisectSteps: 6,        // ends: 5 m / 20 / 2^6 ≈ 4 mm. Neighbouring rays'
+                           // ends are joined into one continuous polygon, so a
+                           // straight build-zone edge comes out straight and the
+                           // ground edge follows the ground. ~3 000 samples,
+                           // ~2.5 ms, once per arm — never per frame.
+    minPx: 6,              // screen radius below which the circle is not drawn
+
+    okColor: '#7fff9a',    // the ghost's own OK green: "build anywhere in here"
+    fillAlpha: 0.115,
+    edgeAlpha: 0.5,
+    edgePx: 1.6,
+
+    invalidColor: '#050a0f',   // geometry refusal: the ground, the zone, itself
+    invalidAlpha: 0.42,
+    hatchColor: 'rgba(190, 215, 235, 0.16)',
+    hatchGapPx: 9,
+    hatchPx: 1,
+
+    budgetColor: '#ffb347',    // money refusal: reachable, unaffordable
+    budgetAlpha: 0.16,
+    budgetEdgeAlpha: 0.55,
+    budgetDash: [6, 5],
+
+    pulseMs: 320,          // a refused click flashes ONCE and says nothing: the
+    pulseAlpha: 0.5,       // dark slices go red, the amber band flares, or — for
+    localPulseM: 0.55,     // a refusal the circle does not draw (already built,
+                           // overlaps a member) — this radius of red at the click
+    badPulseColor: '#ff5a3c',
+    budgetPulseColor: '#ffc46b',
+  },
+
   render: {
     stressWarn: 0.8,       // start visual warning
     flashHz: 5,
@@ -411,21 +464,18 @@ export const CONFIG = {
     marqueeCursorPx: 11,            // half-size of the idle box-delete cursor
     marqueeMinPx: 3,                // below this the rect is a click, not a box
 
-    // ---- TOUCH BUILDING v3 cues (renderer.js reads builder state only) -----
-    // The CHAIN HEAD is the joint the next touch press builds from, and it is
-    // the only thing on screen that is not simply "the design": it has to say
-    // "you are mid-run, tap me to stop". So it pulses — deterministically, off
-    // the renderer's own frame counter (never Date.now/Math.random, so two runs
-    // of the same level draw the same frames), and it is drawn even when it is
-    // still PENDING, i.e. a point the player has claimed that is not a design
-    // node yet (an unconnected node would be an orphan; the design never has
-    // one).
-    chainHeadPx: 7.5,               // ring radius, device px, at mid-breath
+    // ---- BUILDING v4 cues (renderer.js reads builder state only) ----------
+    // The ARMED START is the joint the live reach circle is drawn from. It is
+    // the centre of the picture rather than a separate promise, so it is a
+    // steady ring, not a pulsing one — and it is drawn even when it sits on a
+    // bare anchor with no design node on it yet, because otherwise the first
+    // click of a dam would appear to mark nothing.
+    chainHeadPx: 7.5,               // ring radius, device px
     chainHeadColor: '#7fff9a',      // the ghost's own OK green: "build from here"
     chainHeadLinePx: 2.2,
     chainHeadAlpha: 0.9,
-    chainHeadPulse: 0.32,           // ± fraction of the radius over one breath
-    chainHeadPulseFrames: 72,       // frames per breath (~1.2 s at 60 Hz)
+    // (the breathing pulse retired with the chain: the armed start only exists
+    //  while its circle does, and a live circle needs no second attention cue)
 
     // A node LIFTED by a press-and-hold drag: bigger than a design node, with a
     // soft halo so it reads as "in the air", and red the moment the move would
@@ -859,13 +909,12 @@ export const CONFIG = {
     backing: 'rgba(6, 12, 18, 0.7)',
   },
 
-  // ---- TOUCH BUILDING v3: PRESS-ADJUST-LIFT (Fable) ----------------------
-  // A finger has no hover, no point and no patience for a two-stage gesture.
-  // v2.4's offset cursor + deferred start failed playtest for exactly that
-  // reason: the gesture changed its mind mid-press. v3 never does — every touch
-  // press shows a live preview at the SNAPPED FINGERTIP, sliding adjusts it,
-  // and the LIFT commits. These knobs apply to TOUCH gestures (mouse and pen
-  // keep drag-to-draw untouched) plus the node drag, which both share.
+  // ---- TOUCH FEEL (Fable) ------------------------------------------------
+  // Building v4 (CONFIG.reach) is one gesture on both inputs, so these are no
+  // longer a touch-only dialect: they are the body measurements a thumb needs.
+  // snapMul makes joints POP under a fingertip, holdMs/holdSlopPx are the
+  // press-and-hold that lifts a node (mouse too), tapMaxPx is how much a thumb
+  // is allowed to roll as it leaves the glass and still count as a tap.
   touch: {
     snapMul: 2.0,          // node/anchor snap radii × this for a touch gesture.
                            // The grid stays 0.5 m: a thumb does not need a finer
@@ -878,7 +927,7 @@ export const CONFIG = {
     tapMaxPx: 14,          // CSS px of travel under which a press+lift counts as
                            // a TAP. Looser than the mouse's CONFIG.build.tapMaxPx
                            // because a thumb rolls as it leaves the glass; a tap
-                           // on the chain head is what ENDS a chain.
+                           // on the ARMED START is what ends a run.
   },
 
   levels: {

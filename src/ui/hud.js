@@ -438,20 +438,25 @@ function updateTools(S) {
   if (last.redo !== r) { last.redo = r; D['btn-redo'].disabled = !r; }
 }
 
-// One line, one job: a refusal always wins over teaching, a live touch chain
-// outranks the level's opening advice (it is about the gesture in the player's
-// hand right now), and the teaching text steps forward as they build.
+// One line, one job. Building v4 emptied most of this row on purpose: the reach
+// circle answers "why not there?" as a shape, so the builder no longer writes
+// TOO LONG or UNDERGROUND or OUTSIDE BUILD ZONE at anybody. What still arrives
+// through getHint() is money ("over budget", the one refusal a band can locate
+// but not quantify) and the node-drag refusals, which have no circle of their
+// own. A LIVE circle outranks the level's opening advice — it is about the
+// gesture in the player's hand right now, and it is gone the moment the girder
+// commits — and the teaching text steps forward as they build.
 function updateHint(S) {
   let text = '';
   let kind = '';
 
   const reason = getHint();          // '' once the refusal has gone stale
-  const chain = (getBuilder() || {}).chainHead;
+  const armed = (getBuilder() || {}).chainHead;
   if (reason) {
     text = reason.toUpperCase();
     kind = 'warn';
-  } else if (chain) {
-    text = 'Tap to extend — tap the glowing joint to finish';
+  } else if (armed) {
+    text = 'Tap anywhere in the lit circle to build this beam';
     kind = 'info';
   } else {
     const hints = S.level.hints || [];

@@ -3,6 +3,25 @@
 // Priority for snapPoint(): existing design node > terrain anchor > grid.
 // validate() is the single authority on "may this member exist" — the builder
 // never places anything it rejects, and the ghost shows its `reason` verbatim.
+//
+// BUILDING v4 splits validate() into two halves that answer two different
+// questions, and the split is the whole reason the reach circle can be drawn:
+//
+//   geometryReason()  — is this PLACE legal? length, build zone, ground. True of
+//                       a location whatever else is standing nearby, so it can
+//                       be turned into a SHAPE. reachGeom() adds the wallet on
+//                       top and returns REACH_OK / REACH_BUDGET / REACH_BAD:
+//                       that is exactly what the circle paints.
+//   validate()        — may this MEMBER exist? geometryReason plus everything
+//                       about the design already there (already built, overlaps
+//                       a member, same point). Still the single authority on
+//                       placement; the builder never places anything it rejects.
+//
+// Both are asked about a SNAPPED point, because a click snaps first: see
+// classifyReach (click-time truth) and classifyReachGeom (what the circle
+// draws). Money is its own answer because "you cannot afford that" and "that
+// cannot exist" are different sentences and the player must be able to tell
+// them apart without reading any text.
 
 import { CONFIG } from '../config.js';
 import { MATERIALS } from './materials.js';
@@ -267,40 +286,67 @@ function tooCloseToNeighbour(design, byId, nodeId, fromX, fromY, tx, ty) {
   return false;
 }
 
-// Returns {ok, reason} for a ghost member p0→p1 of material `mat`.
-// p0/p1 are snapPoint() results ({x, y, nodeId, anchorId}).
-export function validate(p0, p1, mat, design, terrain, level, budgetLeft) {
+// THE PLACE, not the design: the refusals that are a property of WHERE the
+// member would be — its length, the build zone, the ground it would sit in or
+// cut through. Split out of validate() because these, and only these, are what
+// the reach circle draws: they are true of a location whatever else is standing
+// nearby, so they can be turned into a shape. Returns '' when the place is fine.
+export function geometryReason(p0, p1, mat, terrain, level) {
   const B = CONFIG.build;
-  if (!mat) return no('no material');
-  if (level && level.materials && level.materials.length && !level.materials.includes(mat.id)) {
-    return no('not available here');
-  }
-
   const len = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-  if (p0.nodeId && p0.nodeId === p1.nodeId) return no('same point');
-  if (len < mat.minLength) return no('too short');
-  if (len > mat.maxLength) return no('too long');
+  if (len < mat.minLength) return 'too short';
+  if (len > mat.maxLength) return 'too long';
 
   // build zone: both endpoints inside → the whole (straight) member is inside
   if (level && level.buildZone) {
     if (!inZone(level.buildZone, p0.x) || !inZone(level.buildZone, p1.x)) {
-      return no('outside build zone');
+      return 'outside build zone';
     }
   }
 
   // terrain: endpoints may touch the ground but not sink into it
   if (terrain && terrain.heightAt) {
-    if (p0.y < terrain.heightAt(p0.x) - B.groundTol) return no('underground');
-    if (p1.y < terrain.heightAt(p1.x) - B.groundTol) return no('underground');
+    if (p0.y < terrain.heightAt(p0.x) - B.groundTol) return 'underground';
+    if (p1.y < terrain.heightAt(p1.x) - B.groundTol) return 'underground';
     const n = B.midSamples;
     for (let i = 1; i < n; i++) {
       const t = i / n;
       const x = p0.x + (p1.x - p0.x) * t;
       const y = p0.y + (p1.y - p0.y) * t;
-      if (y < terrain.heightAt(x) - B.midGroundTol) return no('through the ground');
+      if (y < terrain.heightAt(x) - B.midGroundTol) return 'through the ground';
     }
   }
+  return '';
+}
 
+// True when this material may not be used in this level at all.
+function wrongMaterial(mat, level) {
+  return !!(level && level.materials && level.materials.length && !level.materials.includes(mat.id));
+}
+
+function overBudget(p0, p1, mat, budgetLeft) {
+  if (budgetLeft === undefined || budgetLeft === null) return false;
+  const cost = Math.hypot(p1.x - p0.x, p1.y - p0.y) * mat.costPerMeter;
+  return cost > budgetLeft + CONFIG.build.budgetEps;
+}
+
+// Returns {ok, reason} for a ghost member p0→p1 of material `mat`.
+// p0/p1 are snapPoint() results ({x, y, nodeId, anchorId}).
+//
+// The order of the checks is part of the contract: 'same point' outranks
+// 'too short' (a zero-length stub is not a short member, it is a mis-click), and
+// 'over budget' comes last so a member that is both illegal and unaffordable
+// reports the illegality.
+export function validate(p0, p1, mat, design, terrain, level, budgetLeft) {
+  if (!mat) return no('no material');
+  if (wrongMaterial(mat, level)) return no('not available here');
+  if (p0.nodeId && p0.nodeId === p1.nodeId) return no('same point');
+
+  const geo = geometryReason(p0, p1, mat, terrain, level);
+  if (geo) return no(geo);
+
+  // …and THE DESIGN: refusals about what is already standing here. These are
+  // deliberately NOT part of the reach circle — see reachGeom.
   if (design) {
     if (duplicateMember(design, p0.nodeId, p1.nodeId)) return no('already built');
     const byId = nodeMap(design);
@@ -310,10 +356,70 @@ export function validate(p0, p1, mat, design, terrain, level, budgetLeft) {
     }
   }
 
-  const cost = len * mat.costPerMeter;
-  if (budgetLeft !== undefined && budgetLeft !== null && cost > budgetLeft + B.budgetEps) {
-    return no('over budget');
-  }
-
+  if (overBudget(p0, p1, mat, budgetLeft)) return no('over budget');
   return OK;
+}
+
+// ---- the reach circle (BUILDING v4) ---------------------------------------
+
+export const REACH_OK = 0;       // a click here builds
+export const REACH_BAD = 1;      // the geometry refuses (dark, hatched)
+export const REACH_BUDGET = 2;   // the money refuses (amber band)
+
+// How far a material can span, full stop. Deliberately NOT a function of the
+// budget: reach is physics, and a beam does not get shorter because the player
+// is broke. The wallet gets its own band inside the circle (affordRadius).
+export function reachRadius(mat) {
+  return mat && mat.maxLength > 0 ? mat.maxLength : 0;
+}
+
+// Metres of this material the remaining budget still buys — the radius of the
+// affordable disc inside the reach circle. The budgetEps slack is validate()'s
+// own, carried here so the drawn boundary and the accepted placement are the
+// SAME line rather than two lines a few centimetres apart.
+export function affordRadius(mat, budgetLeft) {
+  if (!mat || !mat.costPerMeter) return Infinity;
+  if (budgetLeft === undefined || budgetLeft === null) return Infinity;
+  return Math.max(0, (budgetLeft + CONFIG.build.budgetEps) / mat.costPerMeter);
+}
+
+// What validate() says about a member from `start` to an ALREADY SNAPPED end.
+export function classifySnapped(start, end, mat, design, terrain, level, budgetLeft) {
+  const v = validate(start, end, mat, design, terrain, level, budgetLeft);
+  if (v.ok) return REACH_OK;
+  return v.reason === 'over budget' ? REACH_BUDGET : REACH_BAD;
+}
+
+// What happens if the player clicks the RAW world point (x, y) with a run armed
+// at `start`: the point is snapped first, exactly as the pointer flow snaps it
+// (`snapOpts` is the same opts object the gesture would pass — radiusMul for a
+// touch), and then validate() decides. This is the CLICK-TIME truth, and the
+// tests use it to check that the drawn circle does not lie.
+export function classifyReach(start, x, y, mat, design, terrain, level, budgetLeft, snapOpts) {
+  const end = snapPoint(x, y, design, terrain, snapOpts);
+  return classifySnapped(start, end, mat, design, terrain, level, budgetLeft);
+}
+
+// WHAT THE CIRCLE DRAWS. Geometry and money only: the length limits, the build
+// zone, the ground, and what the wallet can still pay for.
+//
+// It deliberately does NOT ask about the design. A point a few centimetres off
+// an existing joint fails validate() for a SOCIAL reason — the member is already
+// there, or the new one would leave its neighbour at under minAngleDeg — and
+// those refusals painted the circle with dark blotches clinging to every beam
+// the player had built, which is exactly the nagging v4 exists to delete. Worse,
+// they were usually WRONG about the click: a tap near a joint snaps ONTO it and
+// places a perfectly legal member. So the circle shows the place, the click
+// still checks everything, and the handful of genuine social refusals get the
+// red pulse they always had.
+export function reachGeom(start, end, mat, terrain, level, budgetLeft) {
+  if (!mat || wrongMaterial(mat, level)) return REACH_BAD;
+  if (geometryReason(start, end, mat, terrain, level)) return REACH_BAD;
+  return overBudget(start, end, mat, budgetLeft) ? REACH_BUDGET : REACH_OK;
+}
+
+// reachGeom at a RAW world point: snap first, exactly like a click.
+export function classifyReachGeom(start, x, y, mat, design, terrain, level, budgetLeft, snapOpts) {
+  const end = snapPoint(x, y, design, terrain, snapOpts);
+  return reachGeom(start, end, mat, terrain, level, budgetLeft);
 }
