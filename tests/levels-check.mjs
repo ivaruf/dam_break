@@ -6,7 +6,7 @@
 const ROOT = new URL('../', import.meta.url).href.replace(/\/$/, '');
 
 const { LEVELS } = await import(ROOT + '/src/levels/levels.js');
-const { loadLevelSpec } = await import(ROOT + '/src/levels/levelLoader.js');
+const { loadLevelSpec, seedDesign } = await import(ROOT + '/src/levels/levelLoader.js');
 const { CONFIG } = await import(ROOT + '/src/config.js');
 const { MATERIALS } = await import(ROOT + '/src/build/materials.js');
 const waterSim = await import(ROOT + '/src/physics/water.js');
@@ -92,9 +92,13 @@ for (let i = 0; i < LEVELS.length; i++) {
   }
 
   // ---- water placement vs the dam line (the retention trap)
-  const f = level.water.flood;
+  // every source counts: `flood` plus any extra pulses in `floods`
+  const srcs = [level.water.flood, ...(level.water.floods || [])].filter(Boolean);
+  const f = srcs[0] || null;
   if (o.type !== 'protect') {
-    if (f && f.x >= damX) bad(id, 'flood source x=' + f.x + ' is NOT upstream of damX=' + damX);
+    for (const s of srcs) {
+      if (s.x >= damX) bad(id, 'flood source x=' + s.x + ' is NOT upstream of damX=' + damX);
+    }
     for (const p of level.water.initial) {
       if (p.x1 > damX + 0.01) bad(id, 'initial pond [' + p.x0 + ',' + p.x1 + '] crosses damX=' + damX);
     }
@@ -118,7 +122,7 @@ for (let i = 0; i < LEVELS.length; i++) {
     if (x > damX) break;
     cap += Math.max(0, crestGuess - w.bed[ci]) * w.cellW;
   }
-  const inflow = (f ? f.rate * f.duration : 0) + preFilled;
+  const inflow = srcs.reduce((s, x) => s + x.rate * x.duration, 0) + preFilled;
   const ratio = cap > 0 ? inflow / cap : Infinity;
   if (o.type === 'retain' && ratio > 1.6) {
     warn(id, 'inflow ' + inflow.toFixed(0) + 'm2 is ' + ratio.toFixed(2) + '× basin capacity to a plausible crest — likely always overtops');
@@ -154,6 +158,39 @@ for (let i = 0; i < LEVELS.length; i++) {
   if (!['retain', 'survive', 'protect'].includes(o.type)) bad(id, 'unknown objective type ' + o.type);
   if (!(level.budget > 0)) bad(id, 'no budget');
   if (o.duration !== undefined && (o.duration < 10 || o.duration > 180)) warn(id, 'objective duration ' + o.duration + 's is outside 10..180');
+
+  // ---- prebuilt design (repair levels): must itself be player-buildable
+  if (level.prebuilt) {
+    const seed = seedDesign(level, terrain);
+    if (!seed.members.length) bad(id, 'prebuilt declared but seeds no members');
+    const byId = new Map(seed.nodes.map((n) => [n.id, n]));
+    let seedCost = 0;
+    for (const m of seed.members) {
+      const a = byId.get(m.a), b = byId.get(m.b);
+      const mat = MATERIALS[m.mat];
+      if (!a || !b) { bad(id, 'prebuilt member ' + m.id + ' points at a missing node'); continue; }
+      if (!mat) { bad(id, 'prebuilt member ' + m.id + ' uses unknown material ' + m.mat); continue; }
+      if (!level.materials.includes(m.mat)) bad(id, 'prebuilt uses ' + m.mat + ' which the level does not offer');
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < mat.minLength - 1e-6 || len > mat.maxLength + 1e-6) {
+        bad(id, 'prebuilt member ' + m.id + ' is ' + len.toFixed(2) + 'm — outside ' +
+          m.mat + "'s " + mat.minLength + '..' + mat.maxLength + 'm');
+      }
+      seedCost += len * mat.costPerMeter;
+    }
+    for (const n of seed.nodes) {
+      if (n.y < terrain.heightAt(n.x) - CONFIG.build.groundTol - 1e-6) {
+        bad(id, 'prebuilt node ' + n.id + ' is underground at (' + n.x + ',' + n.y + ')');
+      }
+      if (bz && (n.x < bz.x0 - 0.01 || n.x > bz.x1 + 0.01)) {
+        bad(id, 'prebuilt node ' + n.id + ' outside the buildZone');
+      }
+    }
+    if (seedCost > level.budget) bad(id, 'prebuilt costs $' + Math.round(seedCost) + ' — over the whole budget');
+    else if (seedCost > level.budget * 0.8) {
+      warn(id, 'prebuilt costs ' + Math.round((seedCost / level.budget) * 100) + '% of budget — little left to repair with');
+    }
+  }
 
   // ---- props
   for (const p of level.props || []) {

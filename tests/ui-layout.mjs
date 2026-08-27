@@ -55,6 +55,8 @@ const best = (cost) => ({ cost, retained: 1, broken: 0 });
 // to print "11 of 10".
 const seeded = { unlocked: 99, best: { sandbox: best(42) }, prefs: { showHints: true } };
 for (let i = 1; i <= 10; i++) seeded.best['level-' + String(i).padStart(2, '0')] = best(1000 + i);
+// the campaign levels past 10 carry named ids, not numbered ones
+for (const id of ['patch-job', 'quarry', 'aftershock']) seeded.best[id] = best(2000);
 localStorage.setItem(SAVE, JSON.stringify(seeded));
 
 const { LEVELS } = await import(ROOT + '/src/levels/levels.js');
@@ -101,7 +103,7 @@ const setSave = (bestMap) => {
 
 // (a) ONLY the sandbox cleared. Buggy code: "1 of 10". Correct: no dams yet.
 setSave({ sandbox: best(42) });
-eq(progress(), 'Ten valleys. One rising river.',
+eq(progress(), 'Thirteen valleys. One rising river.',
   'a sandbox best alone counts as ZERO dams standing');
 
 // (b) Nine campaign levels + the sandbox. Buggy code: "10 of 10" — a lie the
@@ -160,7 +162,7 @@ state.save.unlocked = 1;
 state.save.best = {};
 openLevels();
 
-eq(progress(), 'Ten valleys. One rising river.', 'a fresh save shows the tagline, not "0 of 10"');
+eq(progress(), 'Thirteen valleys. One rising river.', 'a fresh save shows the tagline, not "0 of 10"');
 
 const locked = grid().children[1];
 ok(locked._cls.has('locked'), 'level 2 is marked .locked');

@@ -21,6 +21,10 @@ function normaliseWater(w) {
   return {
     initial: Array.isArray(water.initial) ? water.initial : [],
     flood: water.flood || null,
+    // additional pulses (the sim's water.sources is a list already): each is
+    // {x, rate, duration, delay} exactly like `flood`. Levels use this to send
+    // a SECOND surge after the first has settled — see 'aftershock'.
+    floods: Array.isArray(water.floods) ? water.floods : [],
   };
 }
 
@@ -37,6 +41,38 @@ function normaliseProps(props, terrain) {
     out.push({ type: p.type, x: p.x, y, scale });
   }
   return out;
+}
+
+// A design the level ships already built (level.prebuilt) — the "repair the
+// old dam" mechanic. Spec format, index-based so levels stay plain data:
+//
+//   prebuilt: {
+//     nodes:   [[x, y], ...],            // world coords; a node within 0.4 m of
+//                                        // a terrain anchor binds to it
+//     members: [[ai, bi, matId], ...],   // indices into nodes
+//   }
+//
+// Node ids are 'p1'..'pN' and member ids 'pm1'.. so they can never collide with
+// the builder's own 'n'/'m' numbering. The result is an ordinary design object:
+// the player can brace it, delete it (deleting refunds, so demolish-and-rebuild
+// is a legal strategy), and its cost counts against the budget like anything
+// they build themselves — the level's budget must include it.
+export function seedDesign(level, terrain) {
+  const d = { nodes: [], members: [] };
+  const pb = level && level.prebuilt;
+  if (!pb || !Array.isArray(pb.nodes)) return d;
+  pb.nodes.forEach((pt, i) => {
+    let x = pt[0], y = pt[1], anchorId = null;
+    for (const a of terrain.anchors) {
+      if (Math.hypot(a.x - x, a.y - y) <= 0.4) { anchorId = a.id; x = a.x; y = a.y; break; }
+    }
+    d.nodes.push({ id: 'p' + (i + 1), x, y, anchorId });
+  });
+  for (const m of Array.isArray(pb.members) ? pb.members : []) {
+    const a = d.nodes[m[0]], b = d.nodes[m[1]];
+    if (a && b && a !== b) d.members.push({ id: 'pm' + (d.members.length + 1), a: a.id, b: b.id, mat: m[2] });
+  }
+  return d;
 }
 
 export function loadLevelSpec(spec) {

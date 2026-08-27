@@ -29,7 +29,7 @@ import * as titleScene from '../ui/titleScene.js';
 import * as loupe from '../rendering/loupe.js';
 
 import { LEVELS } from '../levels/levels.js';
-import { loadLevelSpec } from '../levels/levelLoader.js';
+import { loadLevelSpec, seedDesign } from '../levels/levelLoader.js';
 
 // ---- scene state ---------------------------------------------------------
 
@@ -131,7 +131,7 @@ function startFromSpec(spec) {
   const { terrain, level } = loadLevelSpec(spec);
   S.level = level;
   S.terrain = terrain;
-  S.design = { nodes: [], members: [] };
+  S.design = seedDesign(level, terrain);   // usually empty; 'repair' levels ship a dam
   S.structure = null;
   S.simSpeed = 1;
   S.simTime = 0;
@@ -157,6 +157,7 @@ function applyInitialWater() {
 function applyFlood() {
   const w = S.level.water || {};
   if (w.flood) waterSim.addSource(S.water, w.flood);
+  for (const f of w.floods || []) waterSim.addSource(S.water, f);
 }
 
 export function release() {

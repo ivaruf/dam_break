@@ -166,7 +166,8 @@ function money(v) {
 // "Ten valleys. One rising river." reads better than "10 valleys." — but the
 // count is derived from LEVELS now, so it has to survive someone adding a level.
 const NUMBERS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
-  'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+  'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen',
+  'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen', 'Twenty'];
 function words(n) { return NUMBERS[n] !== undefined ? NUMBERS[n] : String(n); }
 
 function badgeFor(lv) {

@@ -320,6 +320,9 @@ game.setSpeed(v) · game.loadTestScene(i)  // physics test scenes 1–8
   water: {
     initial: [{x0, x1, surface}],    // pre-filled ponds
     flood:  {x, rate, duration, delay},
+    floods: [{x, rate, duration, delay}, ...], // optional EXTRA pulses (the sim's
+                                     // source list is plural already) — used for
+                                     // multi-surge levels like 'aftershock'
   },
   budget: 12000,
   materials: ['timber','steel','concrete','cable'],
@@ -328,6 +331,14 @@ game.setSpeed(v) · game.loadTestScene(i)  // physics test scenes 1–8
            | {type:'protect', x0, x1, maxDepth:0.3, duration:60},
   hints: ['...'],
   props: [{type:'pine'|'tree'|'rock'|'house'|'sign', x, y?, scale?}], // decor only
+  prebuilt: {                        // optional: a design already standing at load
+    nodes: [[x, y], ...],            // ('repair the old dam' levels). Node ids are
+    members: [[ai, bi, matId], ...], // 'p1'.., members 'pm1'.. (never collide with
+  },                                 // the builder's 'n'/'m'). Its cost counts
+                                     // against the budget; deleting refunds. Must
+                                     // be player-buildable (levels-check gates it)
+                                     // and must NOT win the level on its own
+                                     // (levels-nodam runs with it standing).
 }
 ```
 

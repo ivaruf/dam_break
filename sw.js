@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.6.2'; // smooth build/no-build edge (boundary repair) + drag-to-pan
+const VERSION = 'v2.7.0'; // three new levels: patch-job (repair), quarry (concrete+cable), aftershock (two surges)
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

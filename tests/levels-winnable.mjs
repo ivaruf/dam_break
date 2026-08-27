@@ -32,6 +32,12 @@ const EXPECTED_CAUSE = {
   8:  ['OVERTOP', 'BREACH', 'RETAINED'],           // heavy flood, no time to fix a leak
   9:  ['FLOODED DOWNSTREAM'],                      // open face dumps water on the village
   10: ['OVERTOP', 'BREACH', 'RETAINED', 'COLLAPSE'], // a stub cannot hold the finale
+  // NOTE: the naive sweep CLEARS the design first, so on 11 it is really
+  // playing "demolish the old dam, build a naive wall" — which cannot close
+  // the 8 m sill any more than the wall on 4 could reach across the pit.
+  11: ['BREACH', 'OVERTOP', 'RETAINED'],           // from scratch, nothing spans the sill
+  12: ['BREACH', 'OVERTOP', 'RETAINED'],           // concrete cannot rung 5.5 m; cable seals nothing
+  13: ['BREACH', 'OVERTOP', 'RETAINED', 'SUSTAINED', 'COLLAPSE'], // open face, then surge two
 };
 
 const { LEVELS } = await boot();
@@ -105,6 +111,47 @@ console.log('\nlevel 5 — the wave must break timber and spare steel:');
   if (!steel.win) problem('the steel-column dam must survive the wave');
   if (timber.win) problem('the timber-column dam must NOT survive the wave');
   else if (timber.broken < 1) problem('timber must physically BREAK (broken >= 1), not merely leak');
+}
+
+// ---- level 12 is about the ties, not just the pier ------------------------
+// The same all-concrete face stands with cable corner ties and overturns as
+// one piece without them — tension in the upstream column, cracked members.
+// KEEP IN SYNC with INTENDED[12] in tests/levels-intended.mjs.
+console.log('\nlevel 12 — the stone face must need its rope:');
+{
+  const shape = { crest: 8.2, col: 'concrete', span: 'concrete', brace: 'cable', dy: 0.85 };
+  const tied = simulate(12, (S) => engineered(S, { ...shape, tie: 'cable' }));
+  const untied = simulate(12, (S) => engineered(S, shape));
+  console.log('   with ties:    ' + (tied.win ? 'WIN ' : 'FAIL') + ' load' + fmt.pct(tied.maxLoad) +
+    ' brk' + tied.broken + ' ret' + fmt.pct(tied.retained));
+  console.log('   without ties: ' + (untied.win ? 'WIN ' : 'FAIL') + ' load' + fmt.pct(untied.maxLoad) +
+    ' brk' + untied.broken + ' ret' + fmt.pct(untied.retained) +
+    ' | ' + String(untied.cause).slice(0, 44));
+  if (!tied.win) problem('the tied concrete face must stand');
+  if (untied.win) problem('the untied concrete face must NOT stand (the tie is the lesson)');
+}
+
+// ---- level 13 punishes building for surge one ------------------------------
+// The intended crest holds both surges; ONE ROW SHORT is enough for surge one
+// and is overtopped by surge two's runup; the same shape in ALL TIMBER breaks
+// at the waterline under the moving front and bleeds out before the clock.
+// KEEP IN SYNC with INTENDED[13] in tests/levels-intended.mjs.
+console.log('\nlevel 13 — surge two must collect what surge one excused:');
+{
+  const shape = { col: 'timber', span: 'steel', brace: 'steel', dy: 0.9 };
+  const tall = simulate(13, (S) => engineered(S, { ...shape, crest: 9.3 }));
+  const short = simulate(13, (S) => engineered(S, { ...shape, crest: 8.4 }));
+  const timber = simulate(13, (S) => engineered(S, { crest: 9.3, col: 'timber', span: 'timber', brace: 'timber', dy: 0.9 }));
+  console.log('   full height:   ' + (tall.win ? 'WIN ' : 'FAIL') + ' ret' + fmt.pct(tall.retained) +
+    ' load' + fmt.pct(tall.maxLoad) + ' brk' + tall.broken);
+  console.log('   one row short: ' + (short.win ? 'WIN ' : 'FAIL') + ' ret' + fmt.pct(short.retained) +
+    ' | ' + String(short.cause).slice(0, 44));
+  console.log('   all timber:    ' + (timber.win ? 'WIN ' : 'FAIL') + ' ret' + fmt.pct(timber.retained) +
+    ' brk' + timber.broken + ' | ' + String(timber.cause).slice(0, 44));
+  if (!tall.win) problem('the full-height steel-braced dam must hold both surges');
+  if (short.win) problem('one row short must NOT survive surge two (margin is the lesson)');
+  if (timber.win) problem('the all-timber copy must NOT survive the moving front');
+  else if (timber.broken < 1) problem('all-timber must physically BREAK under surge two');
 }
 
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'difficulty floor holds'));

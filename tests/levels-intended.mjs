@@ -22,7 +22,35 @@
 // row higher than the number here. The crests quoted in the levels.js comments
 // are the BUILT ones.
 
-import { boot, simulate, engineered, fmt } from './levels-designs.mjs';
+import { boot, simulate, engineered, design, fmt } from './levels-designs.mjs';
+
+// Level 11 ships PREBUILT (the old dam) and the player repairs it, so its
+// intended solution is not an engineered() shape: it is the seed frame plus
+// exactly the repairs the level comment names — low boards along the feet,
+// the missing 5.4 rung, and a cable diagonal in every bay. Rebuilt here in
+// full (the harness design() starts from an empty design), so `cost` is the
+// WHOLE dam and the budget ratio means the same thing it means everywhere.
+function patchJob(S) {
+  const d = design(S);
+  const XS = [36, 38, 40, 42, 44];
+  const ROWS = [5.4, 6.2, 7.0];
+  const cols = XS.map((x) => {
+    const nodes = [d.node(x, S.terrain.heightAt(x))];
+    let prev = nodes[0];
+    if (prev.y < 4.6 - 1e-6) { const n = d.node(x, 4.6); d.beam(prev, n, 'timber'); prev = n; nodes.push(n); }
+    for (const y of ROWS) { const n = d.node(x, y); d.beam(prev, n, 'timber'); prev = n; nodes.push(n); }
+    return nodes;
+  });
+  const at = (c, y) => cols[c].find((n) => Math.abs(n.y - y) < 1e-6);
+  for (let c = 0; c + 1 < XS.length; c++) {
+    d.beam(cols[c][0], cols[c + 1][0], 'timber');            // the low boards
+    for (const y of ROWS) d.beam(at(c, y), at(c + 1, y), 'timber');
+    d.beam(cols[c][0], at(c + 1, 5.4), 'cable');             // one diagonal per bay
+    d.beam(at(c, 5.4), at(c + 1, 6.2), 'cable');
+    d.beam(at(c, 6.2), at(c + 1, 7.0), 'cable');
+  }
+  return d;
+}
 
 export const INTENDED = {
   1:  { crest: 6.2,  col: 'timber',   span: 'timber', brace: 'timber', dy: 0.8,
@@ -48,6 +76,12 @@ export const INTENDED = {
         note: 'deliberately MODEST crest — the notch takes the overflow' },
   10: { crest: 13.2, col: 'concrete', span: 'steel',  brace: 'steel', tie: 'cable', dy: 1.0,
         note: 'two piers, concrete columns, steel bracing, cable corner ties' },
+  11: { build: patchJob,
+        note: 'the old frame, repaired: low boards, the missing rung, cable diagonals' },
+  12: { crest: 8.2,  col: 'concrete', span: 'concrete', brace: 'cable', tie: 'cable', dy: 0.85,
+        note: 'all-concrete face on a bed pier, cable diagonals + corner ties' },
+  13: { crest: 9.3,  col: 'timber',   span: 'steel',  brace: 'steel',  dy: 0.9,
+        note: 'the level-8 shape with a row of MARGIN — built for surge two, not surge one' },
 };
 
 const COST_MIN = 0.55;
@@ -63,7 +97,7 @@ for (const key of Object.keys(INTENDED)) {
   const i = Number(key);
   const spec = LEVELS[i - 1];
   const p = INTENDED[i];
-  const r = simulate(i, (S) => engineered(S, p));
+  const r = simulate(i, p.build || ((S) => engineered(S, p)));
   const ratio = r.budget > 0 ? r.cost / r.budget : 0;
 
   // Only BUDGET refusals matter: they mean the intended design does not fit

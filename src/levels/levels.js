@@ -436,6 +436,166 @@ export const LEVELS = [
   },
 
   // ----------------------------------------------------------------- 11 --
+  // PATCH JOB — the first `prebuilt` level: the dam is already standing when
+  // the level opens, and it is exactly the frame the campaign teaches (five
+  // columns on an 8 m sill, rungs every 0.8 m) with two things missing: every
+  // diagonal, and the bottom boards — no rung below 5.4 anywhere, and the
+  // 40–42 bay is missing its 5.4 rung outright. Left alone it leaks under its
+  // own base and is overtopped by what it lets pile up downstream of the gap
+  // (measured: 61% retained, no repair). intended solution: low timber boards
+  // across the feet, the missing rung, and a cable diagonal in every bay —
+  // ~$660 of repairs on the ~$570 already standing, $1,233 all told.
+  // difficulty note: the anchors are 8 m apart, wider than steel reaches, so a
+  // from-scratch naive wall cannot close the face at all — the seed frame (or
+  // a pier of your own) is the only way across. The budget covers demolish-
+  // and-rebuild too (deleting refunds), which is a legal, harder road.
+  {
+    id: 'patch-job',
+    name: 'Patch Job',
+    subtitle: 'Someone built this long ago. Make it hold one more flood.',
+    mode: 'freebuild',
+    terrain: [
+      [0, 12], [7, 9.5], [13, 7], [18, 5.2], [22, 4.2], [28, 4.2], [32, 4.4],
+      [36, 4.6], [38, 4.0], [40, 3.7], [42, 4.0], [44, 4.6], [47, 2.6],
+      [56, 0.5], [70, -2],
+    ],
+    anchors: [[36, 4.6], [44, 4.6]],
+    buildZone: { x0: 34, x1: 45 },
+    water: {
+      initial: [{ x0: 22, x1: 32, surface: 4.9 }],
+      flood: { x: 2, rate: 2.2, duration: 15, delay: 0 },
+    },
+    budget: 1710,
+    materials: ['timber', 'steel', 'concrete', 'cable'],
+    objective: { type: 'retain', minRetention: 0.85, duration: 45 },
+    prebuilt: {
+      // five timber columns (x=36..44 every 2 m), rungs at 5.4/6.2/7.0 —
+      // except the 40–42 bay at 5.4 — no diagonals, nothing below 5.4.
+      nodes: [
+        [36, 4.6], [36, 5.4], [36, 6.2], [36, 7.0],           // 0-3   bank
+        [38, 4.0], [38, 4.6], [38, 5.4], [38, 6.2], [38, 7.0], // 4-8
+        [40, 3.7], [40, 4.6], [40, 5.4], [40, 6.2], [40, 7.0], // 9-13
+        [42, 4.0], [42, 4.6], [42, 5.4], [42, 6.2], [42, 7.0], // 14-18
+        [44, 4.6], [44, 5.4], [44, 6.2], [44, 7.0],           // 19-22 bank
+      ],
+      members: [
+        // verticals
+        [0, 1, 'timber'], [1, 2, 'timber'], [2, 3, 'timber'],
+        [4, 5, 'timber'], [5, 6, 'timber'], [6, 7, 'timber'], [7, 8, 'timber'],
+        [9, 10, 'timber'], [10, 11, 'timber'], [11, 12, 'timber'], [12, 13, 'timber'],
+        [14, 15, 'timber'], [15, 16, 'timber'], [16, 17, 'timber'], [17, 18, 'timber'],
+        [19, 20, 'timber'], [20, 21, 'timber'], [21, 22, 'timber'],
+        // rungs at 5.4 — the 40-42 bay is MISSING
+        [1, 6, 'timber'], [6, 11, 'timber'], [16, 20, 'timber'],
+        // rungs at 6.2 and 7.0
+        [2, 7, 'timber'], [7, 12, 'timber'], [12, 17, 'timber'], [17, 21, 'timber'],
+        [3, 8, 'timber'], [8, 13, 'timber'], [13, 18, 'timber'], [18, 22, 'timber'],
+      ],
+    },
+    hints: [
+      'The frame is sound. What is missing: the boards along the bed, one rung, and every diagonal.',
+      'Watch where it fails once, then fix exactly that. Deleting refunds, if you would rather start over.',
+    ],
+    props: [
+      { type: 'pine', x: 4 }, { type: 'pine', x: 10 }, { type: 'tree', x: 16, scale: 1.05 },
+      { type: 'rock', x: 33 }, { type: 'sign', x: 33.5 }, { type: 'rock', x: 49 },
+      { type: 'house', x: 58 },
+    ],
+  },
+
+  // ----------------------------------------------------------------- 12 --
+  // THE QUARRY — the material-restriction level: concrete and cable only.
+  // intended solution: concrete columns AND concrete rungs (nothing else here
+  // both pushes and seals), a pier on the bed near x=36.75 because concrete
+  // reaches 3 m at most, cable diagonals, and cable CORNER TIES — measured:
+  // without the ties the stiff little face overturns as one piece, 185%
+  // tension in the upstream column and two cracked members; with them it
+  // carries 43%. Crest 8.6 m, ~$3,420.
+  // difficulty note: a single-material builder is structurally locked out —
+  // concrete cannot rung the 5.5 m between the anchors, and cable seals
+  // nothing — so every naive wall stands as two lone stacks with an open face.
+  // The lesson is roles, taken to its extreme: stone pushes, rope pulls.
+  // (An all-stone X-braced copy does also stand — at $4,589 against $4,750,
+  // measured. Mass works; the ledger is what recommends the rope. Both halves
+  // of the tie lesson are gated by tests/levels-winnable.mjs.)
+  {
+    id: 'quarry',
+    name: 'The Quarry',
+    subtitle: 'No timber on this mountain. Stone pushes, rope pulls.',
+    mode: 'freebuild',
+    terrain: [
+      [0, 13], [6, 10.5], [12, 8], [17, 6], [21, 4.8], [27, 4.8], [31, 5.0],
+      [34, 5.2], [37, 4.4], [39.5, 5.2], [42, 3.2], [50, 1], [62, -1.5],
+    ],
+    anchors: [[34, 5.2], [39.5, 5.2]],
+    buildZone: { x0: 32.5, x1: 40.5 },
+    water: {
+      initial: [{ x0: 21, x1: 31, surface: 5.4 }],
+      flood: { x: 2, rate: 3.0, duration: 18, delay: 0 },
+    },
+    budget: 4750,
+    materials: ['concrete', 'cable'],
+    objective: { type: 'retain', minRetention: 0.9, duration: 45 },
+    hints: [
+      'Concrete reaches 3 m at most — a pier on the bed is not optional here.',
+      'A diagonal only ever pulls, and rope pulls for a fraction of the price of stone.',
+    ],
+    props: [
+      { type: 'rock', x: 5 }, { type: 'rock', x: 11, scale: 1.3 }, { type: 'rock', x: 18 },
+      { type: 'rock', x: 31.5 }, { type: 'sign', x: 32 }, { type: 'rock', x: 44 },
+      { type: 'rock', x: 52, scale: 0.8 },
+    ],
+  },
+
+  // ----------------------------------------------------------------- 13 --
+  // AFTERSHOCK — the first two-pulse level (water.floods). Surge one is a
+  // gentle 45 m² fill; sixteen seconds of calm; surge two is 56 m² arriving at
+  // rate 14 — a moving front, not a rising pond. intended solution: the
+  // level-8 shape on a 9 m sill (pier at x=39.5, timber columns, steel rungs
+  // and diagonals in 4.5 m bays) built one row TALLER than surge one needs —
+  // crest 9.5 on a reservoir that works at ~8.9. ~$5,490.
+  // difficulty note: MEASURED, and gated by tests/levels-winnable.mjs:
+  //   crest 9.5 steel rungs+braces  WIN  ret 89%, load  87%, nothing breaks
+  //   crest 8.6 (one row short)     FAIL ret 82% — surge two's runup tops it
+  //   crest 9.5 all timber ($1.6k)  FAIL ret 83% — the wave snaps 18 members
+  //                                 at the waterline and the wreck bleeds out
+  // The 72 s window is part of the design: a dam that survives the impact
+  // wrecked does not get to run out the clock — the wound keeps draining.
+  // The 4.5 m bays are too: timber rungs REACH (the trap is available), and
+  // timber at 4.5 m under a moving front is exactly what bending punishes.
+  {
+    id: 'aftershock',
+    name: 'Aftershock',
+    subtitle: 'Two surges. Holding the first is not the same as holding both.',
+    mode: 'freebuild',
+    terrain: [
+      [0, 12.5], [6, 10], [12, 7.5], [17, 5.6], [21, 4.4], [27, 4.4], [31, 4.7],
+      [35, 5.0], [39.5, 4.1], [44, 5.0], [47, 2.8], [55, 0.8], [68, -2],
+    ],
+    anchors: [[35, 5.0], [44, 5.0]],
+    buildZone: { x0: 33, x1: 45 },
+    water: {
+      initial: [],
+      floods: [
+        { x: 2, rate: 4.5, duration: 10, delay: 0 },
+        { x: 2, rate: 14, duration: 4, delay: 26 },
+      ],
+    },
+    budget: 7600,
+    materials: ['timber', 'steel', 'concrete', 'cable'],
+    objective: { type: 'retain', minRetention: 0.85, duration: 72 },
+    hints: [
+      'The second surge is bigger than the first. Build for the water that is coming, not the water you see.',
+      'A member holding at 90% is not holding — it is being eaten. Give the frame margin.',
+    ],
+    props: [
+      { type: 'pine', x: 4 }, { type: 'pine', x: 10, scale: 1.1 }, { type: 'tree', x: 15 },
+      { type: 'rock', x: 32 }, { type: 'sign', x: 32.5 }, { type: 'rock', x: 48 },
+      { type: 'pine', x: 58 },
+    ],
+  },
+
+  // ----------------------------------------------------------------- 14 --
   // intended solution: none — sandbox. Budget and materials are effectively
   // unlimited and the flood never really stops; the point is free play.
   // difficulty note: n/a. Deliberately survivable with nothing built.
