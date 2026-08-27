@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.7.0'; // three new levels: patch-job (repair), quarry (concrete+cable), aftershock (two surges)
+const VERSION = 'v2.9.0'; // three big levels: longwall (27 m crossing), staircase (tallest wall), highwater (90 s finale). v2.8.0 is reserved by the unmerged `turbines` branch.
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

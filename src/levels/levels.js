@@ -596,6 +596,138 @@ export const LEVELS = [
   },
 
   // ----------------------------------------------------------------- 14 --
+  // THE LONG WALL — the widest crossing in the game: three 9 m gaps,
+  // A(57,5.5)-B(66,5.6)-C(75,5.5)-D(84,5.7), 27 m of sill against level 10's 16.
+  // intended solution: one pier in each gap dip (x=61.5, 70.5, 79.5), concrete
+  // columns, steel rungs and diagonals across six ~4.5 m bays — the level-10
+  // face at nearly double width.
+  // difficulty note: every gap is 9 m, wider than steel's 7 m reach, so a naive
+  // one-column-per-anchor wall cannot close a single bay — the face stays open
+  // however tall or expensive it gets. MEASURED honesty (2026-08-27): a
+  // partial-width wall on a subset of the anchors DOES hold, because the
+  // upstream slope wedges swallow the flood — the same is true of level 10
+  // ($8.8k two-anchor dam, measured), so that has always been the campaign's
+  // accepted min-max play and the harness pins only the naive floor.
+  {
+    id: 'longwall',
+    name: 'The Long Wall',
+    subtitle: 'Three gaps. One wall. The widest crossing yet.',
+    mode: 'freebuild',
+    terrain: [
+      [0, 16], [10, 12], [20, 8.5], [27, 6.3], [33, 5.1], [45, 5.1], [51, 5.3],
+      [57, 5.5], [61.5, 4.4], [66, 5.6], [70.5, 4.4], [75, 5.5], [79.5, 4.4],
+      [84, 5.7], [88, 3.2], [98, 1], [112, -1.2], [126, -3],
+    ],
+    anchors: [[57, 5.5], [66, 5.6], [75, 5.5], [84, 5.7]],
+    buildZone: { x0: 55, x1: 85 },
+    water: {
+      initial: [{ x0: 33, x1: 45, surface: 5.9 }],
+      flood: { x: 2, rate: 8.0, duration: 43, delay: 0 },
+    },
+    budget: 31000,
+    materials: ['timber', 'steel', 'concrete', 'cable'],
+    objective: { type: 'retain', minRetention: 0.92, duration: 60 },
+    hints: [
+      'Every gap is wider than steel reaches. A pier in each dip, then rung the bays.',
+      'Twenty-seven metres of face. Price a bay before you build six of them.',
+    ],
+    props: [
+      { type: 'pine', x: 8 }, { type: 'pine', x: 16, scale: 1.1 }, { type: 'tree', x: 24 },
+      { type: 'rock', x: 48 }, { type: 'sign', x: 53 }, { type: 'rock', x: 92 },
+      { type: 'pine', x: 102 },
+    ],
+  },
+
+  // ----------------------------------------------------------------- 15 --
+  // STAIRCASE — the valley floor steps DOWN into a deep gate at the bottom:
+  // benches at 7.0 and 5.4, then the true sill A(62.6,3.8)-B(70,3.2). The
+  // reservoir floods the whole staircase (the steps are reservoir floor, not
+  // dam sites — there are deliberately NO anchors up there: an early draft put
+  // decoy anchors on the benches and a measured bench wall won at $7.1k,
+  // CHEAPER than the gate dam, inverting the lesson). The dam at the gate is
+  // the TALLEST wall in the game: ~8 m columns under ~7 m of water.
+  // intended solution: TWO piers in the gate (x≈65.1, 67.5, feet ~3.0-3.4),
+  // concrete columns, steel rungs and diagonals in three ~2.5 m bays — at this
+  // head the bay width is the whole game ("halve the bay, halve the moment"):
+  // the same face on ONE pier (3.7 m bays) measured at 87% load, inside the
+  // creep zone for the full 60 s hold.
+  // difficulty note: the gate gap is 7.4 m, past steel's reach, so a naive
+  // one-column-per-anchor wall never closes it.
+  {
+    id: 'staircase',
+    name: 'Staircase',
+    subtitle: 'The valley steps down into a gate. Dam it at the bottom.',
+    mode: 'freebuild',
+    terrain: [
+      [0, 15], [8, 11.5], [16, 8.4], [22, 7.2], [28, 6.6], [38, 6.6], [43, 6.8],
+      [47, 7.0], [51, 6.2], [55, 5.4], [59, 4.6], [62.6, 3.8], [67, 3.0],
+      [70, 3.2], [73, 1.4], [82, -0.2], [96, -2.2], [110, -4],
+    ],
+    anchors: [[62.6, 3.8], [70, 3.2]],
+    buildZone: { x0: 58, x1: 71 },
+    water: {
+      initial: [{ x0: 28, x1: 38, surface: 7.1 }],
+      flood: { x: 2, rate: 6.5, duration: 40, delay: 0 },
+    },
+    budget: 14700,
+    materials: ['timber', 'steel', 'concrete', 'cable'],
+    objective: { type: 'retain', minRetention: 0.9, duration: 60 },
+    hints: [
+      'The steps are not the dam site — they are the reservoir floor. The gate at the bottom is where you build.',
+      'Seven metres of head. Narrow bays carry it; wide ones sit at the limit and creep.',
+    ],
+    props: [
+      { type: 'pine', x: 6 }, { type: 'pine', x: 13, scale: 1.1 }, { type: 'tree', x: 20 },
+      { type: 'rock', x: 41 }, { type: 'sign', x: 56 }, { type: 'rock', x: 76 },
+      { type: 'pine', x: 88 },
+    ],
+  },
+
+  // ----------------------------------------------------------------- 16 --
+  // HIGH WATER — the new finale: the biggest reservoir in the game arriving
+  // over more than a minute, held for 90 s. Three 10 m gaps,
+  // A(70,6.4)-B(80,6.5)-C(90,6.6)-D(100,6.5), ~7 m of water at the dips.
+  // intended solution: TWO piers per gap (~3.3 m bays, "halve the bay, halve
+  // the moment"): concrete columns, steel rungs and diagonals, nine bays wide,
+  // measured at 42% load — real margin for the longest hold in the campaign.
+  // MEASURED honesty (2026-08-27): the one-pier-per-gap version (5 m bays,
+  // $24.8k) does STAND, at 76% load — above creepStart for the whole 90 s.
+  // It is legal, hot, and the hint says so without lying; physics retuning
+  // could legitimately flip it, and levels-intended pins only the dense build.
+  // difficulty note: gaps past steel's reach (naive face never closes) AND the
+  // longest hold in the campaign, so near-misses drain out. Tune LAST, after
+  // 14 and 15 — it assumes both of their lessons.
+  {
+    id: 'highwater',
+    name: 'High Water',
+    subtitle: 'The valley fills for a minute. Hold it for ninety seconds.',
+    mode: 'freebuild',
+    terrain: [
+      [0, 19], [12, 14], [24, 10], [32, 7], [40, 5.8], [56, 5.8], [64, 6.1],
+      [70, 6.4], [75, 5.0], [80, 6.5], [85, 5.0], [90, 6.6], [95, 5.0],
+      [100, 6.5], [104, 3.4], [114, 1], [128, -1.6], [144, -3.8],
+    ],
+    anchors: [[70, 6.4], [80, 6.5], [90, 6.6], [100, 6.5]],
+    buildZone: { x0: 68, x1: 101 },
+    water: {
+      initial: [{ x0: 40, x1: 56, surface: 6.8 }],
+      flood: { x: 2, rate: 7.0, duration: 62, delay: 0 },
+    },
+    budget: 37500,
+    materials: ['timber', 'steel', 'concrete', 'cable'],
+    objective: { type: 'retain', minRetention: 0.9, duration: 90 },
+    hints: [
+      'Wide bays catch more water and sit closer to the limit. At this depth, margin is piers.',
+      'Ninety seconds is long enough for creep to finish what the flood starts. Build with room to spare.',
+    ],
+    props: [
+      { type: 'pine', x: 10 }, { type: 'pine', x: 20, scale: 1.15 }, { type: 'tree', x: 30 },
+      { type: 'rock', x: 60 }, { type: 'sign', x: 66 }, { type: 'rock', x: 108 },
+      { type: 'pine', x: 120 }, { type: 'tree', x: 132 },
+    ],
+  },
+
+  // ----------------------------------------------------------------- 17 --
   // intended solution: none — sandbox. Budget and materials are effectively
   // unlimited and the flood never really stops; the point is free play.
   // difficulty note: n/a. Deliberately survivable with nothing built.

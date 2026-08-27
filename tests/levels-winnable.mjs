@@ -38,6 +38,9 @@ const EXPECTED_CAUSE = {
   11: ['BREACH', 'OVERTOP', 'RETAINED'],           // from scratch, nothing spans the sill
   12: ['BREACH', 'OVERTOP', 'RETAINED'],           // concrete cannot rung 5.5 m; cable seals nothing
   13: ['BREACH', 'OVERTOP', 'RETAINED', 'SUSTAINED', 'COLLAPSE'], // open face, then surge two
+  14: ['OVERTOP', 'BREACH', 'RETAINED'],           // 9 m gaps: no naive bay ever closes
+  15: ['OVERTOP', 'BREACH', 'RETAINED'],           // 7.4 m gate: same, and the flood is big
+  16: ['OVERTOP', 'BREACH', 'RETAINED', 'COLLAPSE'], // 10 m gaps + the longest hold
 };
 
 const { LEVELS } = await boot();
@@ -152,6 +155,29 @@ console.log('\nlevel 13 — surge two must collect what surge one excused:');
   if (short.win) problem('one row short must NOT survive surge two (margin is the lesson)');
   if (timber.win) problem('the all-timber copy must NOT survive the moving front');
   else if (timber.broken < 1) problem('all-timber must physically BREAK under surge two');
+}
+
+// ---- level 15 is about bay width under real head ---------------------------
+// The SAME gate dam (concrete columns, steel rungs+braces, crest 10.8) sits at
+// ~22% load on two piers (~2.5 m bays) and ~87% — inside the creep zone, above
+// CONFIG.damage.creepStart — on one pier (3.7 m bays). Both stand today; the
+// lesson is the margin, so the gate pins the LOAD CONTRAST, not a win/fail bit
+// (a physics retune that pushes the hot face past 100% only sharpens the
+// lesson). KEEP IN SYNC with INTENDED[15] in tests/levels-intended.mjs.
+console.log('\nlevel 15 — the gate face must reward the second pier:');
+{
+  const shape = { crest: 10.8, col: 'concrete', span: 'steel', brace: 'steel', dy: 0.85 };
+  const dense = simulate(15, (S) => engineered(S, { ...shape, colSpacing: 2.6 }));
+  const sparse = simulate(15, (S) => engineered(S, shape));
+  console.log('   two piers: ' + (dense.win ? 'WIN ' : 'FAIL') + ' load' + fmt.pct(dense.maxLoad) +
+    ' brk' + dense.broken + ' ret' + fmt.pct(dense.retained));
+  console.log('   one pier:  ' + (sparse.win ? 'WIN ' : 'FAIL') + ' load' + fmt.pct(sparse.maxLoad) +
+    ' brk' + sparse.broken + ' ret' + fmt.pct(sparse.retained) +
+    ' | ' + String(sparse.cause).slice(0, 44));
+  if (!dense.win) problem('the two-pier gate dam must win');
+  if (dense.maxLoad > 0.5) problem('the two-pier face must carry real margin (load <= 50%)');
+  if (!sparse.win && sparse.broken < 1) problem('if the one-pier face fails it must fail by BREAKING, not by leaking');
+  if (sparse.win && sparse.maxLoad < 0.7) problem('the one-pier face must sit in the creep zone (load >= 70%) — the margin IS the lesson');
 }
 
 console.log('\n' + (fails ? 'FAILURES: ' + fails : 'difficulty floor holds'));

@@ -82,6 +82,12 @@ export const INTENDED = {
         note: 'all-concrete face on a bed pier, cable diagonals + corner ties' },
   13: { crest: 9.3,  col: 'timber',   span: 'steel',  brace: 'steel',  dy: 0.9,
         note: 'the level-8 shape with a row of MARGIN — built for surge two, not surge one' },
+  14: { crest: 10.6, col: 'concrete', span: 'steel',  brace: 'steel',  dy: 0.95,
+        note: 'the level-10 face at 27 m: a pier in each of the three gap dips' },
+  15: { crest: 10.8, col: 'concrete', span: 'steel',  brace: 'steel',  dy: 0.85, colSpacing: 2.6,
+        note: 'the tallest wall in the game — TWO piers in the gate, ~2.5 m bays under 7 m of head' },
+  16: { crest: 12.4, col: 'concrete', span: 'steel',  brace: 'steel',  dy: 1.0, colSpacing: 3.4, tie: 'cable',
+        note: 'the finale: two piers per gap, nine dense bays, margin enough to hold 90 s' },
 };
 
 const COST_MIN = 0.55;
