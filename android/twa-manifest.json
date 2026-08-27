@@ -1,0 +1,42 @@
+{
+  "packageId": "io.github.ivaruf.dambreak",
+  "host": "ivaruf.github.io",
+  "name": "Dam Break",
+  "launcherName": "DamBreak",
+  "display": "standalone",
+  "themeColor": "#0d1b26",
+  "themeColorDark": "#0d1b26",
+  "navigationColor": "#0d1b26",
+  "navigationColorDark": "#0d1b26",
+  "navigationDividerColor": "#0d1b26",
+  "navigationDividerColorDark": "#0d1b26",
+  "backgroundColor": "#0d1b26",
+  "enableNotifications": false,
+  "startUrl": "/dam_break/",
+  "iconUrl": "https://ivaruf.github.io/dam_break/icons/icon-512.png",
+  "maskableIconUrl": "https://ivaruf.github.io/dam_break/icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "android"
+  },
+  "appVersion": "2.9.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://ivaruf.github.io/dam_break/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://ivaruf.github.io/dam_break/",
+  "minSdkVersion": 21,
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": []
+}
