@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.9.0'; // three big levels: longwall (27 m crossing), staircase (tallest wall), highwater (90 s finale). v2.8.0 is reserved by the unmerged `turbines` branch.
+const VERSION = 'v2.9.1'; // a way back to the arcade when the arcade is what framed us. v2.8.0 is reserved by the unmerged `turbines` branch.
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
