@@ -16,9 +16,11 @@
      breach. Same silhouette as icons/icon-512.png (tools/make-icons.py), reduced
      to the four shapes that still read in a browser tab. -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230d1b26'/><path d='M0 27h32v5H0z' fill='%232c3729'/><path d='M0 27V15q1-8 12-9.5 9-1 10.5 4.5 1 4-3.5 4.5-3.5.5-2.5 4 1 4.5 4 9z' fill='%231c6fb4'/><path d='M3.5 13Q6 5.5 13.5 5q7-.3 8.3 4.6q.8 3.4-3 4.2' stroke='%23e6f5ff' stroke-width='2.6' fill='none' stroke-linecap='round'/><circle cx='19.5' cy='15.5' r='1.6' fill='%23e6f5ff'/><circle cx='21.5' cy='18.5' r='1.2' fill='%23e6f5ff'/><g stroke='%23c8954a' stroke-width='2.2' stroke-linecap='round'><path d='M23.5 27.5V17.5M29.5 27.5V17.5M23.5 17.5h6M23.5 27.5l6-10'/></g></svg>">
-<!-- A way back to the arcade, but only when the arcade is what framed us:
-     standalone this adds nothing at all. Classic and deferred on purpose, so
-     /arcade/ being unreachable costs a button rather than the whole page. -->
+<!-- What quitting means here: back to the arcade when the arcade is what
+     framed us, closing the window when we are installed, and an honest note
+     when we are a tab no script may close. It draws nothing — the button is
+     ours. Classic and deferred on purpose, so /arcade/ being unreachable
+     costs the quit button rather than the whole page. -->
 <script src="../arcade/exit.js" defer></script>
 </head>
 <body>
@@ -213,6 +215,10 @@
     <button class="big-btn pulse" id="btn-play" type="button">▶ PLAY</button>
     <button class="small-btn" id="btn-sandbox" type="button">⚒ SANDBOX</button>
     <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ UPDATE READY</button>
+    <!-- Leaving the game itself. Stays hidden until screens.js knows what it
+         can honestly offer — back to the arcade, or closing a window a script
+         is actually allowed to close. See ../arcade/exit.js. -->
+    <button class="small-btn quit-btn hidden" id="btn-quit" type="button"></button>
     <p class="hint">Drag to build · pinch or wheel to zoom · Space to release the flood</p>
     <span id="game-version" class="version-tag"></span>
   </div>
@@ -224,6 +230,9 @@
     </div>
     <div id="level-grid"></div>
     <button class="small-btn" id="btn-levels-back" type="button">BACK</button>
+    <!-- The same way out, repeated here because this screen is what the in-game
+         ☰ opens: leaving should never be three taps deep. -->
+    <button class="small-btn quit-btn hidden" id="btn-quit-levels" type="button"></button>
   </div>
 
   <div id="screen-result" class="screen hidden">

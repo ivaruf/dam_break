@@ -153,6 +153,18 @@ html, body {
 
 .update-btn { border-color: var(--good); color: var(--good); background: var(--surface-2); animation: update-glow 2.4s ease-in-out infinite; }
 
+/* Leaving the game, as opposed to leaving a level. Deliberately the quietest
+   control on the screen: findable, and never competing with PLAY. */
+.quit-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+  box-shadow: none;
+}
+.quit-btn:not(:disabled):hover,
+.quit-btn:focus-visible { color: var(--text); border-color: var(--border); }
+.quit-btn:disabled { opacity: 0.7; }
+
 .big-btn.release {
   background: var(--release-bg);
   border-color: var(--release-border);

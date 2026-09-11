@@ -115,6 +115,45 @@ function dismissSplash() {
   if (typeof setTimeout === 'function') setTimeout(drop, 320); else drop();
 }
 
+// ---- leaving the game ---------------------------------------------------
+
+/**
+ * The quit buttons on the title and level screens.
+ *
+ * They stay hidden unless the arcade's exit.js is actually there to answer,
+ * because it is another repository's file and is allowed to be missing — and
+ * a quit button that cannot quit is worse than no quit button at all. What
+ * they SAY is its answer too: inside the arcade this goes back to the floor,
+ * installed it closes the window, and in an ordinary tab no script may close
+ * anything, so the button must not pretend otherwise.
+ */
+function wireQuit() {
+  const exit = globalThis.ArcadeExit;
+  if (!exit) return;
+
+  const label = exit.verb({
+    arcade: '◂ BACK TO THE ARCADE',
+    app: '✕ CLOSE',
+    tab: '✕ CLOSE',
+  });
+
+  for (const id of ['btn-quit', 'btn-quit-levels']) {
+    const button = el(id);
+    if (!button) continue; // the stub DOM in tests/ carries only what it needs
+    button.textContent = label;
+    button.classList.remove('hidden');
+    button.addEventListener('click', () => {
+      exit.quit().then((how) => {
+        // Refused: the browser will not close a window it did not open. Say so
+        // where the button is rather than leaving a dead control on screen.
+        if (how !== 'refused') return;
+        button.textContent = 'CLOSE THIS TAB YOURSELF';
+        button.disabled = true;
+      });
+    });
+  }
+}
+
 // ---- init ---------------------------------------------------------------
 
 export function init() {
@@ -130,6 +169,8 @@ export function init() {
     const next = getScene().levelIndex + 1;
     if (next <= LEVELS.length && isUnlocked(next)) emit('ui:level', { index: next });
   });
+
+  wireQuit();
 
   el('btn-tut-skip').addEventListener('click', () => { markTutSeen(); hideTutorial(); });
   el('btn-tut-next').addEventListener('click', () => { tutStep++; renderTutorial(); });
