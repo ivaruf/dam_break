@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.9.2'; // quit from the title and level screens: back to the arcade, or close. v2.8.0 is reserved by the unmerged `turbines` branch.
+const VERSION = 'v2.9.3'; // a pause before a drag is aiming, not a lift: only the armed joint can be dragged, so the second beam builds instead of moving the first. v2.8.0 is reserved by the unmerged `turbines` branch.
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

@@ -1921,10 +1921,14 @@ section('10. BUILDING v4 — THE REACH CIRCLE');
 }
 
 // --------------------------------------------------- 11. NODE DRAGGING ------
-// Press-and-HOLD on an existing design node (CONFIG.touch.holdMs, travel under
-// holdSlopPx) LIFTS it: it follows the snapped pointer, every attached member
-// follows live with validity checking, and the release either commits the move
-// as ONE undo step or reverts the whole thing. Mouse and touch both.
+// Tap a joint to arm it, then press-and-HOLD that same joint (CONFIG.touch.holdMs,
+// travel under holdSlopPx) and it LIFTS: it follows the snapped pointer, every
+// attached member follows live with validity checking, and the release either
+// commits the move as ONE undo step or reverts the whole thing. Mouse and touch
+// both. ONLY the armed start lifts (section I): a press that arms a joint, or
+// that completes a beam, never does, however long it is held — a pause before
+// a drag is aiming, and it used to turn the second beam of every dam into a
+// drag of the first one's endpoint.
 
 section('11. NODE DRAGGING — HOLD TO LIFT');
 {
@@ -1956,6 +1960,13 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     emit('ui:tool', { id: 'build' });
     down(at(x0, y0)); move(at(x1, y1)); up(at(x1, y1));
   };
+  // Only the ARMED start lifts, so every hold below is preceded by this: the
+  // BUILD button takes any circle down, and the tap arms the joint — a tap on
+  // a joint with nothing armed can only arm, never complete a beam onto it.
+  const arm = (x, y, ptype) => {
+    emit('ui:tool', { id: 'build' });
+    down(at(x, y), ptype); up(at(x, y), false, ptype);
+  };
   const nodeAt = (x, y) => design.nodes.find((n) =>
     Math.abs(n.x - x) < 1e-6 && Math.abs(n.y - y) < 1e-6);
   const memberLen = (m) => {
@@ -1979,6 +1990,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
 
   // ---- A. a slide under the hold is NOT a lift ----------------------------
   {
+    arm(28, 6, 'touch');
     down(at(28, 6), 'touch');
     move(at(28.9, 6), 'touch');                    // 12.6 px > holdSlopPx (10)
     eq(B.nodeDrag, null, 'moving past holdSlopPx before holdMs is a slide, not a lift');
@@ -1993,6 +2005,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
   // ---- B. holding still, then moving, LIFTS the node ---------------------
   {
     const n = nodeAt(28, 6);
+    arm(28, 6, 'touch');
     down(at(28, 6), 'touch');
     await sleep(HOLD);
     move(at(28.2, 6.1), 'touch');                  // first move after the hold
@@ -2037,6 +2050,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     eq(design.members.length, 1, 'setup: one beam from anchor a1 to a free end at (32, 6)');
     eq(nodeAt(32, 6).anchorId, null, 'setup: the end to drag is unanchored');
 
+    arm(32, 6, 'touch');
     down(at(32, 6), 'touch');
     await sleep(HOLD);
     move(at(31.9, 3.1), 'touch');                  // anchor a2 sits at (32, 3)
@@ -2062,6 +2076,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     setup();
     const n = nodeAt(28, 6);
     const before = design.nodes.map((q) => ({ id: q.id, x: q.x, y: q.y, a: q.anchorId }));
+    arm(28, 6, 'touch');
     const undos = B.undo.length;
     down(at(28, 6), 'touch');
     await sleep(HOLD);
@@ -2080,6 +2095,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
   {
     // outside the build zone is refused the same way
     setup();
+    arm(28, 6, 'touch');
     down(at(28, 6), 'touch');
     await sleep(HOLD);
     move(at(23.5, 5), 'touch');                    // zone is 24..34
@@ -2092,6 +2108,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     // …and so is a drop straight on top of another joint (the drag does not
     // snap to nodes, so this is the one overlap it has to catch itself)
     setup();
+    arm(28, 6, 'touch');
     down(at(28, 6), 'touch');
     await sleep(HOLD);
     move(at(26, 3), 'touch');                      // the anchored node's spot
@@ -2117,6 +2134,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     eq(design.members.length, 2, 'setup: plus an expensive one');
     emit('ui:material', { id: 'timber' });
     ok(builder.budgetLeft() < 20, `setup: almost nothing left ($${builder.budgetLeft().toFixed(0)})`);
+    arm(28, 5, 'touch');
     down(at(28, 5), 'touch');
     await sleep(HOLD);
     move(at(28.1, 5.9), 'touch');                  // grows both beams
@@ -2132,6 +2150,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
   // ---- E. interruptions never commit -------------------------------------
   {
     setup();
+    arm(28, 6, 'touch');
     down(at(28, 6), 'touch');
     await sleep(HOLD);
     move(at(28.5, 7), 'touch');
@@ -2140,6 +2159,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     eq(B.nodeDrag, null, 'a pinch-cancel ends the lift');
     ok(!!nodeAt(28, 6), 'and puts the node back');
 
+    arm(28, 6, 'touch');
     down(at(28, 6), 'touch');
     await sleep(HOLD);
     move(at(28.5, 7), 'touch');
@@ -2150,6 +2170,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     up(at(28.5, 7), false, 'touch');
     ok(!!nodeAt(28, 6), 'the stale release changes nothing');
 
+    arm(28, 6, 'touch');
     down(at(28, 6), 'touch');
     await sleep(HOLD);
     move(at(28.5, 7), 'touch');
@@ -2164,6 +2185,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
   {
     setup();
     const n = nodeAt(28, 6);
+    arm(28, 6);
     emit('input:down', { ...at(28, 6), id: 1, button: 0, cancel: false });
     await sleep(HOLD);
     emit('input:move', { ...at(29, 7), id: 1, button: 0, cancel: false, hover: false });
@@ -2232,6 +2254,67 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     up(at(28, 7), false, 'touch');
     eq(design.members.length, 2, 'and the lift places it');
     ok(!!nodeAt(26, 6), 'the joint it started from did not move');
+  }
+
+  // ---- I. THE LIFT GATE: a pause before a drag is aiming, not a lift -------
+  // The bug this guards (reported 2026-09-14 as "my first beam glitches to the
+  // wrong location and I cannot make more beams"): build a beam, press its
+  // endpoint to build the next one, look at where it should go — which takes
+  // longer than holdMs, every time — then drag. That used to lift the joint
+  // instead of drawing the beam; the drop was refused as 'too long', nothing
+  // was built, and the same habit failed the same way until the dam was
+  // cleared. A press that ARMS a joint never lifts it, on mouse or touch.
+  {
+    design.nodes.length = 0; design.members.length = 0;
+    builder.startLevel(L, TERRAIN, design);
+    put(26, 3, 26, 7);                             // the first beam
+    eq(design.members.length, 1, 'setup: the first beam stands');
+    eq(B.chainHead, null, 'setup: and its commit left nothing armed');
+    for (const ptype of ['touch', undefined]) {
+      const who = ptype || 'mouse';
+      const joint = nodeAt(26, 7);
+      down(at(26, 7), ptype);                      // press the endpoint: this ARMS it
+      ok(!!B.chainHead && B.chainHead.nodeId === joint.id, `[${who}] the press armed the joint`);
+      await sleep(HOLD);                           // …and rest there, aiming
+      move(at(27, 7.5), ptype);
+      move(at(29, 8), ptype);
+      eq(B.nodeDrag, null, `[${who}] a press that armed the joint never lifts it, however long it rested`);
+      ok(B.ghost !== null, `[${who}] it draws the beam the player is aiming`);
+      up(at(29, 8), false, ptype);
+      eq(design.members.length, 2, `[${who}] and the release builds it`);
+      ok(!!nodeAt(26, 7) && nodeAt(26, 7).id === joint.id, `[${who}] from a joint that did not move`);
+      ok(!!nodeAt(29, 8), `[${who}] to where the finger let go`);
+      ok(builder.undo(), `[${who}] (undo the beam so the other input starts from the same dam)`);
+    }
+  }
+  // …and neither does a COMPLETION press: holding on some OTHER joint inside
+  // the circle builds a beam from the armed start to wherever the drag ends,
+  // and leaves the joint it pressed on exactly where it was.
+  {
+    setup();                                       // a0 (26,3) → (28,6) ← a1 (29,3)
+    arm(28, 6, 'touch');
+    const other = nodeAt(29, 3);
+    down(at(29, 3), 'touch');                      // inside the circle, on a joint
+    await sleep(HOLD);
+    move(at(30, 7), 'touch');                      // clear of every joint, anchor and the rim
+    eq(B.nodeDrag, null, 'a held press on another joint inside the circle lifts nothing');
+    ok(B.ghost !== null, 'it previews a beam from the armed start instead');
+    up(at(30, 7), false, 'touch');
+    eq(design.members.length, 3, 'and the release builds it');
+    ok(!!nodeAt(29, 3) && nodeAt(29, 3).id === other.id, 'the joint pressed on stayed put');
+    ok(!!nodeAt(30, 7), 'and the beam ends where the drag did');
+  }
+  // …while the deliberate gesture — tap the joint, then hold it — still lifts
+  // (section B is the full contract; this is the one-line sanity check).
+  {
+    setup();
+    arm(28, 6, 'touch');
+    down(at(28, 6), 'touch');
+    await sleep(HOLD);
+    move(at(28.5, 7), 'touch');
+    ok(B.nodeDrag !== null && B.nodeDrag.nodeId === nodeAt(28.5, 7).id,
+      'tap the joint, then hold it: that still lifts it');
+    up(at(28.5, 7), true, 'touch');                // cancel: leave the fixture alone
   }
 }
 
@@ -2422,6 +2505,10 @@ section('12. FUZZ — TOUCH GESTURES + NODE DRAGS');
         const nodes = design.nodes;
         if (nodes.length) {
           const n = nodes[Math.floor(r() * nodes.length)];
+          // only the ARMED start lifts: tap the joint first, with nothing else
+          // up, so the tap arms it rather than completing a beam onto it
+          emit('ui:tool', { id: 'build' });
+          down(at(n.x, n.y), 0, 'touch'); up(at(n.x, n.y), false, 0, 'touch');
           down(at(n.x, n.y), 0, 'touch');
           await sleep(T.holdMs + 12);
           move(at(n.x + (r() - 0.5) * 8, n.y + (r() - 0.5) * 8), 'touch');

@@ -48,11 +48,15 @@
 //   boxdelete tool → press/drag draws a marquee; release deletes the whole
 //                    SECTION inside it as one undo step (a tap falls back to the
 //                    single-member erase, so the tool is never a dead zone)
-//   NODE DRAGGING (mouse AND touch, build tool): press-and-HOLD on an existing
-//                    design node (CONFIG.touch.holdMs, travel under holdSlopPx)
-//                    lifts it; it follows the snapped pointer with every
-//                    attached member recomputed live, and the release either
-//                    commits the move as ONE undo step or reverts it whole.
+//   NODE DRAGGING (mouse AND touch, build tool): tap a joint to arm it, then
+//                    press-and-HOLD that same joint (CONFIG.touch.holdMs,
+//                    travel under holdSlopPx) and it lifts; it follows the
+//                    snapped pointer with every attached member recomputed
+//                    live, and the release either commits the move as ONE undo
+//                    step or reverts it whole. ONLY the armed start can lift: a
+//                    press that arms a joint, or that completes a beam onto
+//                    one, never does, however long it rests first — see the
+//                    lift gate in buildDown for why.
 //
 // Snapping to nodes and anchors is CONFIG.touch.snapMul stronger for a touch
 // gesture (the grid stays 0.5 m), so a fingertip pops onto a joint instead of
@@ -760,6 +764,22 @@ function buildDown(p) {
   // deliberately used the plain snap (a repaired point is never a joint)
   const end = from ? snapEndAt(from, p.x, p.y, touch) : snap;
 
+  // THE LIFT GATE. Only a press on the ALREADY-armed start may go on to lift
+  // its node (holdCheck). A press that arms a joint, or that completes a beam
+  // onto some other joint inside the circle, never lifts it, however long the
+  // finger rests first — because resting first is how people aim: press the
+  // joint, look at where the beam should go, then drag. That pause is
+  // routinely longer than holdMs, and before this gate it turned the second
+  // beam of every dam into a joint drag: the first beam's endpoint stretched
+  // after the finger, the drop was usually refused as 'too long', nothing got
+  // built, and the same habit failed the same way on every retry until the
+  // dam was cleared. To move a joint: tap it (arms it), then press it again,
+  // hold, and drag. Tap = never mind, drag = build, hold-then-drag = move —
+  // three gestures on one spot, and none of them is the one you make when you
+  // have merely paused.
+  const liftable = armed && inside && snap.kind === 'node' && !!snap.nodeId &&
+    !!B.chainHead && B.chainHead.nodeId === snap.nodeId;
+
   B.drag = {
     mode: 'build',
     touch,
@@ -775,7 +795,7 @@ function buildDown(p) {
     last: end,
     snapped: false,
     moved: false,
-    holdNodeId: snap.kind === 'node' ? snap.nodeId : null,
+    holdNodeId: liftable ? snap.nodeId : null,
   };
   B.ghost = null;
   clearMarquee();
@@ -965,8 +985,9 @@ function updateGhost(end) {
 // position the ONE undo step snapshots when it is legal.
 
 // True when the press has earned the lift. Called on every move of a press that
-// started on a node: past holdSlopPx before holdMs the gesture is a slide (draw
-// a beam), and the candidate is dropped for good.
+// started on the ARMED joint (buildDown's lift gate — no other press carries a
+// holdNodeId): past holdSlopPx before holdMs the gesture is a slide (draw a
+// beam), and the candidate is dropped for good.
 function holdCheck(travel) {
   const d = B.drag;
   const T = CONFIG.touch;

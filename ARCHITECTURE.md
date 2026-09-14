@@ -407,10 +407,14 @@ sizing (min 44px touch targets).
   centre (always a real anchor/node, always null after a commit);
   .reachPulse = null | {kind:'bad'|'budget'|'local', x, y, seq}.
   snapPoint's chainNodeId option is no longer used by any gesture.
-- NODE DRAGGING (mouse + touch): press-and-hold CONFIG.touch.holdMs (350 ms,
-  slop holdSlopPx) on a design node lifts it; it follows the snapped pointer
-  (anchors/grid only), attached members recompute live with validity; valid
-  lift = ONE undo step (anchorId gained/lost on drop), invalid = full revert.
+- NODE DRAGGING (mouse + touch): ONLY THE ARMED START LIFTS. Tap a joint (arms
+  it), then press-and-hold it CONFIG.touch.holdMs (350 ms, slop holdSlopPx)
+  and it lifts; it follows the snapped pointer (anchors/grid only), attached
+  members recompute live with validity; valid lift = ONE undo step (anchorId
+  gained/lost on drop), invalid = full revert. A press that ARMS a joint or
+  COMPLETES a beam never lifts, however long it is held (v2.9.3): a pause
+  before a drag is how people aim, and the old any-joint hold turned the
+  second beam of every dam into a drag of the first one's endpoint.
   Builder publishes getBuilder().chainHead {x,y,nodeId,anchorId,kind,pending}
   and .nodeDrag {nodeId,x,y,anchorId,ok,reason,touch,orig,members,snap};
   design:change gains {action:'move', id}. loupe.js is finger-centred.
