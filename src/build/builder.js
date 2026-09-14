@@ -60,7 +60,14 @@
 //
 // Snapping to nodes and anchors is CONFIG.touch.snapMul stronger for a touch
 // gesture (the grid stays 0.5 m), so a fingertip pops onto a joint instead of
-// drifting past it. The loupe (rendering/loupe.js) magnifies the fingertip.
+// drifting past it.
+//
+// GONE with v2.9.4: the touch loupe (rendering/loupe.js), the magnified window
+// beside the finger. Players asked for it to go. The snap ring, the ghost beam
+// and the reach circle are drawn in the frame itself and were always the real
+// answer to "where will this land?"; the loupe only repeated them, and cost a
+// corner of a small screen to do it. Deleted, not hidden — nothing reads
+// CONFIG.loupe any more, and nothing should bring it back behind a setting.
 //
 // GONE with v2.5: pending chain heads on empty ground, the touchbuild drag
 // mode, and the press-adjust-lift branch that let a grid point start a run.
@@ -800,7 +807,7 @@ function buildDown(p) {
   B.ghost = null;
   clearMarquee();
   // Publish the snap immediately: on the very first contact the snap ring IS
-  // the answer to "where will this land?", and the loupe magnifies it.
+  // the answer to "where will this land?".
   B.hover = { x: p.x, y: p.y, snap: end };
   updateGhost(end);
 }

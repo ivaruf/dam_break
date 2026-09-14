@@ -51,7 +51,9 @@ FABLE (do not edit without Fable):
   src/main.js  src/config.js
   src/core/game.js  src/core/state.js  src/core/events.js
   src/core/terrain.js  src/core/camera.js  src/core/input.js
-  src/rendering/loupe.js  (touch placement magnifier)
+  (src/rendering/loupe.js, the touch placement magnifier, was deleted in
+   v2.9.4 at players' request — the snap ring and ghost in the frame are the
+   whole placement feedback now)
 
 OPUS A — Physics & Simulation:
   src/physics/structures.js   (nodes/members/debris data + instantiate)
@@ -279,7 +281,7 @@ import { on, off, emit } from '../core/events.js';
 | `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` `ui:undo` `ui:redo` `ui:delete` `ui:clear` | | hud |
 | `ui:level`       | `{index}` (1-based campaign index)             | screens |
 | `design:change`  | `{action:'place'\|'delete', id}` (sounds/UI refresh) | builder |
-| `input:down/move/up` | `{x, y, px, py, id, button, cancel, ptype}` (ptype: 'touch'\|'mouse'\|'pen' — drives the touch loupe) | input   |
+| `input:down/move/up` | `{x, y, px, py, id, button, cancel, ptype}` (ptype: 'touch'\|'mouse'\|'pen' — a touch gesture gets the wider CONFIG.touch snap radii) | input   |
 | `input:pan` `{dx,dy}` px · `input:zoom` `{px,py,factor}` · `input:key` `{key}` | | input |
 
 Stats object (modes.js builds it; result screen shows it):
@@ -417,7 +419,7 @@ sizing (min 44px touch targets).
   second beam of every dam into a drag of the first one's endpoint.
   Builder publishes getBuilder().chainHead {x,y,nodeId,anchorId,kind,pending}
   and .nodeDrag {nodeId,x,y,anchorId,ok,reason,touch,orig,members,snap};
-  design:change gains {action:'move', id}. loupe.js is finger-centred.
+  design:change gains {action:'move', id}.
 - Budget: cost = Σ len·costPerMeter; builder refuses placement over budget.
 - modes.js runs objectives: track retention via `water.volumeBetween` +
   `stats.totalIn`, protect-zone depth via `depthAt`, survival timer, and emits

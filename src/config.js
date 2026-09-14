@@ -910,24 +910,6 @@ export const CONFIG = {
     },
   },
 
-  // Touch loupe: the magnifier that keeps a finger from hiding the point it is
-  // placing. Centred on the FINGERTIP (touch building v3 has no offset cursor —
-  // the snapped preview and its snap rings are drawn in the frame itself, and
-  // the loupe's job is only to let the player SEE them under their own hand).
-  loupe: {
-    radiusPx: 52,          // circle radius (CSS px)
-    zoom: 2.2,             // magnification of the frame region
-    offsetPx: 88,          // fingertip -> loupe centre distance
-    topClearancePx: 96,    // don't collide with the HUD top row
-    ringPx: 3,
-    ringOk: '#7fff9a',
-    ringBad: '#ff5a3c',
-    ringNeutral: '#35a7ff',
-    cross: 'rgba(230, 245, 255, 0.9)',
-    crossPx: 10,
-    backing: 'rgba(6, 12, 18, 0.7)',
-  },
-
   // ---- TOUCH FEEL (Fable) ------------------------------------------------
   // Building v4 (CONFIG.reach) is one gesture on both inputs, so these are no
   // longer a touch-only dialect: they are the body measurements a thumb needs.

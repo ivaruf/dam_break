@@ -2011,7 +2011,7 @@ section('11. NODE DRAGGING — HOLD TO LIFT');
     move(at(28.2, 6.1), 'touch');                  // first move after the hold
     ok(B.nodeDrag !== null, 'a press held past holdMs lifts the node it is on');
     eq(B.nodeDrag.nodeId, n.id, 'the lifted node is the one under the finger');
-    eq(B.nodeDrag.touch, true, 'and it knows it is a touch drag (loupe + snapMul)');
+    eq(B.nodeDrag.touch, true, 'and it knows it is a touch drag (snapMul)');
     eq(B.ghost, null, 'no beam ghost while a node is in the air');
 
     const lens = design.members.map(memberLen);

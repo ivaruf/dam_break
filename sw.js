@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.9.3'; // a pause before a drag is aiming, not a lift: only the armed joint can be dragged, so the second beam builds instead of moving the first. v2.8.0 is reserved by the unmerged `turbines` branch.
+const VERSION = 'v2.9.4'; // the touch loupe is gone: players asked for the magnifier beside the finger to go, so it is deleted, not hidden. v2.8.0 is reserved by the unmerged `turbines` branch.
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
@@ -33,7 +33,6 @@ const ASSETS = [
   './src/rendering/renderer.js',
   './src/rendering/waterRenderer.js',
   './src/rendering/effects.js',
-  './src/rendering/loupe.js',
   './src/ui/hud.js',
   './src/ui/titleScene.js',
   './src/ui/screens.js',
