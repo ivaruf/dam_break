@@ -4,12 +4,15 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.9.4'; // the touch loupe is gone: players asked for the magnifier beside the finger to go, so it is deleted, not hidden. v2.8.0 is reserved by the unmerged `turbines` branch.
+const VERSION = 'v2.9.5'; // cached shells learn the arcade moved to gophercloud.games
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
   './',
   './index.html',
+  // Has to be IN the cache, not merely deployed: the players this rescues
+  // are the ones whose browser has stopped asking this origin for anything.
+  './moved.js',
   './manifest.webmanifest',
   './styles.css',
   './src/main.js',
