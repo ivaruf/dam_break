@@ -141,7 +141,7 @@ function wireQuit() {
   if (!exit) return;
 
   const label = exit.verb({
-    arcade: '◂ BACK TO THE ARCADE',
+    arcade: '◂ BACK TO ARCADE',
     app: '✕ CLOSE',
     tab: '✕ CLOSE',
   });

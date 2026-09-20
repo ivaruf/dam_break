@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.10.0'; // a corner cluster on every menu: sound levels, saved, and fullscreen
+const VERSION = 'v2.10.1'; // the way out says what it does: back to arcade, or close
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
