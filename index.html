@@ -237,6 +237,52 @@
     <button class="small-btn quit-btn hidden" id="btn-quit-levels" type="button"></button>
   </div>
 
+  <!-- ==================== SOUND ====================
+       Two levels, set once, behind a door — in-play chrome competes with the
+       valley for both attention and screen, and a control that is only ever
+       touched once does not belong permanently on the title screen.
+
+       THE HINT LINE IS THE POINT. DAM BREAK has no audio whatsoever: no
+       music, no cues, no AudioContext anywhere in the repo. Two sliders that
+       silently did nothing would be a lie, so this one says so. What it is
+       for is written in src/ui/sound.js — the levels are stored for real, so
+       the day the water gets a voice it arrives where the player set it. -->
+  <div id="screen-sound" class="screen hidden">
+    <div class="end-card sound-card">
+      <div class="screen-head">
+        <h2>SOUND</h2>
+        <p class="tagline">Nothing to hear yet.</p>
+      </div>
+
+      <!-- One wrapper around both rows so the short-landscape pass can stand
+           the whole pair beside the text as a single grid area, without any
+           of this markup moving. -->
+      <div class="vol-rows">
+        <div class="vol-row">
+          <label class="vol-label" for="vol-music">MUSIC</label>
+          <div class="vol-slider">
+            <input type="range" id="vol-music" min="0" max="100" step="1" value="60">
+            <output id="vol-music-out" for="vol-music">60</output>
+          </div>
+        </div>
+        <div class="vol-row">
+          <label class="vol-label" for="vol-sfx">EFFECTS</label>
+          <div class="vol-slider">
+            <input type="range" id="vol-sfx" min="0" max="100" step="1" value="80">
+            <output id="vol-sfx-out" for="vol-sfx">80</output>
+          </div>
+        </div>
+      </div>
+
+      <p class="hint sound-note">⚠ DAM BREAK ships silent — no music, no cues,
+        nothing these two sliders can move today. They are saved to this device
+        anyway, so when the water finally gets a voice it arrives at the level
+        you chose rather than at full blast.</p>
+
+      <button class="small-btn" id="btn-sound-back" type="button">BACK</button>
+    </div>
+  </div>
+
   <div id="screen-result" class="screen hidden">
     <div class="end-card">
       <h2 id="result-heading">DAM TEST COMPLETE</h2>
@@ -251,7 +297,64 @@
       </div>
     </div>
   </div>
+
+  <!-- ==================== THE CORNER ====================
+       Sound and fullscreen as icons, top right. Neither belongs to a dam and
+       neither is a setting of the game, so neither earns a row on the title
+       screen; and in a corner at this size a symbol survives where a word
+       would have to be shrunk until nobody read it.
+
+       SHOWN WITH THE MENUS, TAKEN AWAY FOR A RUN, and the reason is that the
+       same corner is already spoken for: #btn-hud-menu sits there the moment a
+       level loads, one row under the budget block, and two things cannot have
+       one corner. Nothing is lost by the trade. Fullscreen is a document-level
+       state that survives every phase change, so it is set once on the way in
+       and still in force when the dam goes; and the volume of a game with no
+       audio is emphatically not a mid-flood decision. screens.js toggles this
+       cluster on phase:change, exactly opposite to how hud.js toggles #hud.
+
+       Art carries the meaning, so both buttons carry a real aria-label and
+       title — and src/ui/screen.js rewrites the second one as the state
+       changes, because the label is the only thing that can tell a screen
+       reader which way the toggle is currently pointing. -->
+  <!-- NOT hidden to start with: the first thing this game paints behind the
+       splash is the title screen, so visible is already the right answer, and
+       leaving it to screens.js's first phase:change would both flash and make
+       the cluster depend on a boot that is the very thing it is meant to
+       outlive. screens.js only ever takes it AWAY. -->
+  <div id="corner-tools">
+    <button id="btn-sound" class="tool-btn" type="button" title="Sound" aria-label="Sound">
+      <!-- A speaker and two waves. Deliberately WITHOUT a slash: this opens a
+           panel, it is not a mute toggle. -->
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M11 5 6 9H3v6h3l5 4Z" fill="none" stroke="currentColor"
+              stroke-width="1.9" stroke-linejoin="round"/>
+        <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" fill="none"
+              stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <!-- HIDDEN until src/ui/screen.js has confirmed this browser has element
+         fullscreen at all — iPhone Safari does not, and a button that does
+         nothing when pressed is worse than no button. The cluster just
+         shrinks to one icon there. -->
+    <button id="btn-screen" class="tool-btn" type="button" aria-pressed="false"
+            title="Fullscreen" aria-label="Fullscreen" hidden>
+      <!-- Four corners pushing out, and the same four pulled in for the
+           pressed state. CSS picks between them off aria-pressed, so the
+           picture and the label can never disagree. -->
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path class="icon-out" d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path class="icon-in" d="M3 9h6V3m12 6h-6V3M9 15H3v6m12 0v-6h6" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
 </div>
 <script type="module" src="src/main.js"></script>
+<!-- Its OWN module script, beside the game rather than inside it: whatever the
+     game does or fails to do, the corner's fullscreen button still works. The
+     file is not called fullscreen.js and never will be — see its header. -->
+<script type="module" src="src/ui/screen.js"></script>
 </body>
 </html>

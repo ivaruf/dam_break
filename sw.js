@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.9.5'; // cached shells learn the arcade moved to gophercloud.games
+const VERSION = 'v2.10.0'; // a corner cluster on every menu: sound levels, saved, and fullscreen
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
@@ -39,6 +39,11 @@ const ASSETS = [
   './src/ui/hud.js',
   './src/ui/titleScene.js',
   './src/ui/screens.js',
+  './src/ui/sound.js',
+  // Loaded by index.html as its OWN module script rather than imported by
+  // main.js, so it has to be listed here in its own right — nothing else
+  // would ever pull it into the cache.
+  './src/ui/screen.js',
   './src/ui/debug.js',
   './src/levels/levels.js',
   './src/levels/levelLoader.js',

@@ -73,6 +73,13 @@ OPUS C — Rendering, UX & Content:
   styles.css
   src/rendering/renderer.js   src/rendering/waterRenderer.js  src/rendering/effects.js
   src/ui/hud.js  src/ui/screens.js  src/ui/debug.js  src/ui/titleScene.js
+  src/ui/sound.js             (the two stored volume levels — NOT an audio
+                               engine; this game has no audio yet, and that
+                               file explains why the levels exist anyway)
+  src/ui/screen.js            (the corner cluster's fullscreen toggle; loaded
+                               by index.html as its own module script, imports
+                               nothing and exports nothing, and is NOT named
+                               fullscreen.js for the reason in its header)
   src/levels/levels.js  src/levels/levelLoader.js
 ```
 

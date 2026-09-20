@@ -10,12 +10,21 @@ import { CONFIG } from '../config.js';
 import { LEVELS } from '../levels/levels.js';
 import { isUnlocked, bestFor } from '../core/state.js';
 import { getScene } from '../core/game.js';
+import * as sound from './sound.js';
 
 const el = (id) => document.getElementById(id);
+
+// The screen show() last raised, excluding the sound panel itself. The sound
+// panel is a door off whichever menu the player was standing on — title, level
+// select or result — so BACK has to know which one to put them back on, and the
+// phase cannot answer that: #btn-play raises the level select without ever
+// leaving the 'title' phase.
+let lastMenu = 'screen-title';
 
 function show(id) {
   for (const s of document.querySelectorAll('.screen')) s.classList.add('hidden');
   if (id) { const n = el(id); if (n) n.classList.remove('hidden'); }
+  if (id && id !== 'screen-sound') lastMenu = id;
 }
 
 // ---- tutorial copy (level 1 only) ---------------------------------------
@@ -154,6 +163,63 @@ function wireQuit() {
   }
 }
 
+// ---- the corner cluster and the sound panel -----------------------------
+
+/**
+ * Show the top-right cluster on the menus, and take it away for a run.
+ *
+ * This is the exact complement of hud.js's own `inGame` test, and it is
+ * written the same way on purpose so the two cannot drift apart: the moment
+ * #hud appears, #btn-hud-menu owns that corner, and two things cannot have
+ * one corner. index.html carries the longer reasoning next to the markup.
+ */
+function paintCorner(phase) {
+  const node = el('corner-tools');
+  if (!node) return;
+  const inGame = phase === 'build' || phase === 'sim';
+  node.classList.toggle('hidden', inGame);
+}
+
+/**
+ * One fader. src/ui/sound.js owns the value and the storage; this owns nothing
+ * but the widget.
+ *
+ * Stored 0..1, displayed 0..100 — a slider the player drags wants whole
+ * numbers and a gain wants a fraction, and doing the conversion once here is
+ * better than doing it at every future call site.
+ */
+function wireFader(inputId, outId, read, write) {
+  const input = el(inputId);
+  if (!input) return;                    // the stub DOM in tests/ is sparse
+  const out = el(outId);
+
+  const paint = (pct) => { if (out) out.textContent = String(pct); };
+
+  const start = Math.round(read() * 100);
+  input.value = String(start);
+  paint(start);
+
+  // 'input', not 'change': the number beside the fader has to track the thumb
+  // while it is still moving. It is also the hook the day this game gets audio
+  // — hearing the level you are setting is the whole point of a volume
+  // control, and sound.js's onVolume() is where that listens.
+  input.addEventListener('input', () => {
+    const v = Math.max(0, Math.min(100, Math.round(Number(input.value) || 0)));
+    paint(v);
+    write(v / 100);
+  });
+}
+
+function wireSound() {
+  wireFader('vol-music', 'vol-music-out', sound.music, sound.setMusic);
+  wireFader('vol-sfx', 'vol-sfx-out', sound.sfx, sound.setSfx);
+
+  const open = el('btn-sound');
+  if (open) open.addEventListener('click', () => show('screen-sound'));
+  const back = el('btn-sound-back');
+  if (back) back.addEventListener('click', () => show(lastMenu || 'screen-title'));
+}
+
 // ---- init ---------------------------------------------------------------
 
 export function init() {
@@ -171,11 +237,13 @@ export function init() {
   });
 
   wireQuit();
+  wireSound();
 
   el('btn-tut-skip').addEventListener('click', () => { markTutSeen(); hideTutorial(); });
   el('btn-tut-next').addEventListener('click', () => { tutStep++; renderTutorial(); });
 
   on('phase:change', ({ phase }) => {
+    paintCorner(phase);
     if (phase === 'title') { hideTutorial(); show('screen-title'); }
     else if (phase === 'levelselect') { hideTutorial(); buildLevelGrid(); show('screen-levels'); }
     else if (phase === 'result') { hideTutorial(); showResult(); }
