@@ -96,6 +96,12 @@ function wireEvents() {
     } else if (key === 'F2') {
       debug.toggle();
     } else if (key === 'Escape') {
+      // The sound panel is a door the corner speaker can open from ANY screen
+      // now, this one included, so Escape has to close it by exactly the door
+      // its BACK button uses before it is allowed to mean anything else — screens.js
+      // owns that door and answers whether there was one to close. Without this
+      // step, Escape over an open panel would abandon the level instead.
+      if (screens.closeSound()) return;
       if (S.phase === 'sim' || S.phase === 'build') setPhase('levelselect');
     }
   });

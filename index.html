@@ -304,24 +304,26 @@
        screen; and in a corner at this size a symbol survives where a word
        would have to be shrunk until nobody read it.
 
-       SHOWN WITH THE MENUS, TAKEN AWAY FOR A RUN, and the reason is that the
-       same corner is already spoken for: #btn-hud-menu sits there the moment a
-       level loads, one row under the budget block, and two things cannot have
-       one corner. Nothing is lost by the trade. Fullscreen is a document-level
-       state that survives every phase change, so it is set once on the way in
-       and still in force when the dam goes; and the volume of a game with no
-       audio is emphatically not a mid-flood decision. screens.js toggles this
-       cluster on phase:change, exactly opposite to how hud.js toggles #hud.
+       ON EVERY SCREEN AND THROUGH EVERY RUN, FIXED TO THE PAGE. It used to be
+       taken away for build and sim, on the argument that ☰ LEVELS already owned
+       this corner and two things cannot have one. What that actually bought the
+       player was a game they could not go fullscreen in once they had started
+       it, and a volume they could only change by abandoning the level — a
+       control that goes away when the screen changes is not a corner, it is a
+       menu item that happens to sit in one. So ☰ moved instead: one row down,
+       flush with this strip's right edge, inside the column the HUD reserves
+       (styles.css, --hud-menu-gap). Reading in from the corner it is
+       fullscreen, sound, then ☰ — the page's pair outermost, the run's own
+       button inside them, because only one of the three outlives a level.
 
        Art carries the meaning, so both buttons carry a real aria-label and
        title — and src/ui/screen.js rewrites the second one as the state
        changes, because the label is the only thing that can tell a screen
        reader which way the toggle is currently pointing. -->
-  <!-- NOT hidden to start with: the first thing this game paints behind the
-       splash is the title screen, so visible is already the right answer, and
-       leaving it to screens.js's first phase:change would both flash and make
-       the cluster depend on a boot that is the very thing it is meant to
-       outlive. screens.js only ever takes it AWAY. -->
+  <!-- Plain markup, never hidden and never touched by JS: the first thing this
+       game paints behind the splash is the title screen, so visible is already
+       the right answer, and the cluster must not depend on a boot that it
+       exists to outlive. -->
   <div id="corner-tools">
     <button id="btn-sound" class="tool-btn" type="button" title="Sound" aria-label="Sound">
       <!-- A speaker and two waves. Deliberately WITHOUT a slash: this opens a

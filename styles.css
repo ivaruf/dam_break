@@ -57,11 +57,26 @@
 
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  /* HUD geometry that TWO rules have to agree on, so it lives in one place:
-     the top-right menu button's own inset, and the right-hand gutter the
-     readouts must keep clear of it. 44px button + 12px edge inset. */
-  --hud-menu-gap: 56px;
-  --hud-menu-top: 68px;   /* one #hud-top row down, so it never fights the budget */
+  /* THE TOP-RIGHT CORNER, MEASURED ONCE.
+     The sound + fullscreen cluster is fixed to the page and is there on every
+     screen and right through a run (see #corner-tools), so everything else
+     that wants that corner is positioned off ITS box rather than off a number
+     somebody guessed. Reading in from the corner: fullscreen, sound — and then
+     ☰ LEVELS, one row below and flush with the same edge, because it belongs
+     to a level and only exists while one is loaded. */
+  --corner-inset: 12px;   /* the cluster's own distance from the top and right edges */
+  --corner-w: 104px;      /* 5 strip padding + 44 plate + 6 gap + 44 plate + 5 */
+  --corner-h: 54px;       /* 5 + 44 + 5 */
+
+  /* The width of that whole column, which #hud-top keeps clear on its right so
+     the budget block can never end up under the cluster, and inside which ☰
+     sits one row down. It stays ONE token shared by the HUD and the button so
+     the two cannot drift apart into an overlap — the readouts running under the
+     menu button was a real regression once. */
+  --hud-menu-gap: calc(var(--corner-inset) + var(--corner-w) + 8px);
+  /* Straight under the cluster with 2px of air. Derived, so shrinking the
+     plates on a short viewport pulls this up by exactly as much. */
+  --hud-menu-top: calc(var(--corner-inset) + var(--corner-h) + 2px);
 }
 
 /* ==================== RESET / BASE ==================== */
@@ -522,20 +537,29 @@ html, body {
 .result-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 
 /* ==================== THE CORNER CLUSTER ====================
-   Sound and fullscreen, top right, on the menu screens only — index.html says
-   why it is not there mid-run.
+   Sound and fullscreen, top right, ON EVERY SCREEN AND THROUGH EVERY RUN.
 
    It borrows the toolbar's own vocabulary rather than inventing one: two
    .tool-btn plates inside a bordered strip, which is exactly what #tool-group
    is at the foot of the build screen. This game draws its controls as square
    plates bolted onto a blueprint; a soft round glass pill would belong to some
    other game in the arcade, not to this one. 44px targets come with .tool-btn,
-   so a tablet is already served. */
+   so a tablet is already served.
+
+   FIXED TO THE PAGE, not to whatever the page is currently showing. It used to
+   be taken away for build and sim because ☰ LEVELS wanted the same corner, and
+   the price of that trade was that a player who had started a level could not
+   reach fullscreen or the volume again without abandoning it. The pair belongs
+   to the page; ☰ belongs to the run, so ☰ is the one that moved — one row down,
+   inside the column --hud-menu-gap reserves, flush with this strip's own edge.
+
+   Above .screen (10) and above #hud (5): this outlives both, so nothing either
+   of them does may cover it. */
 #corner-tools {
-  position: absolute;
-  top: calc(12px + env(safe-area-inset-top, 0px));
-  right: calc(12px + env(safe-area-inset-right, 0px));
-  z-index: 11;                  /* above .screen (10): the cluster sits ON the menus */
+  position: fixed;
+  top: calc(var(--corner-inset) + env(safe-area-inset-top, 0px));
+  right: calc(var(--corner-inset) + env(safe-area-inset-right, 0px));
+  z-index: 30;
   display: flex;
   gap: 6px;
   padding: 5px;
@@ -687,6 +711,13 @@ html, body {
   justify-content: space-between;
   gap: clamp(6px, 2.5vw, 16px);
   padding: 10px clamp(10px, 3vw, 16px);
+  /* AND THEN THE CORNER'S COLUMN ON TOP OF THAT. The cluster is fixed to the
+     page and is up through build and sim as well as on the menus, so this row
+     has to stop short of it rather than run underneath: that reservation is
+     what lets "$5,470 LEFT OF $8,000" and a fullscreen plate share one edge.
+     It costs the row ~124px of width; the three columns' min-contents come to
+     about 160px, so a 320px phone still fits all three. */
+  padding-right: calc(var(--hud-menu-gap) + env(safe-area-inset-right, 0px));
 }
 
 /* nowrap is load-bearing. "LEFT OF $5,470" broke onto THREE lines when the top
@@ -720,17 +751,17 @@ html, body {
    flex-shrunk box overflows its own bounds and prints on top of the neighbour
    (they don't wrap — there is no break opportunity inside "248%"). flex:0 0 auto
    + nowrap keeps each column exactly as wide as its content. */
-/* The right-hand gutter is reserved for #btn-hud-menu, which is absolutely
-   positioned OUTSIDE this flow (it sits in its own row at --hud-menu-top,
-   clear of the budget block). Both the button's offset and this padding are
-   derived from --hud-menu-gap so they cannot drift apart into an overlap — the
-   readouts running under the menu button was a real regression once. */
+/* No gutter of its own any more. #btn-hud-menu is still absolutely positioned
+   OUTSIDE this flow, in its own row at --hud-menu-top — but that row is now
+   inside the corner column that #hud-top as a whole keeps clear (see its
+   padding-right, the same --hud-menu-gap). Nothing in this box can reach
+   either the button or the cluster above it, so padding it a second time would
+   only squeeze two readouts that have to fit a 320px screen. */
 #hud-readouts {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   justify-content: flex-end;
-  padding-right: var(--hud-menu-gap);
 }
 .readout { display: flex; flex-direction: column; align-items: flex-end; flex: 0 0 auto; }
 .readout > span { white-space: nowrap; }
@@ -937,12 +968,15 @@ html, body {
   padding: clamp(10px, 2.8vw, 15px) clamp(14px, 4vw, 26px);
 }
 
-/* menu/levels button lives in its own top-right row, one #hud-top row below the
-   budget block. Its inset and the readouts' right gutter both derive from
-   --hud-menu-gap / --hud-menu-top (see the tokens block). */
+/* ☰ LEVELS: one row under the fixed corner cluster and flush with its right
+   edge, so the two read as one column of controls rather than two things
+   fighting for one corner. It belongs to a RUN — it exists only while #hud
+   does — which is why it is the one that gave way; the pair above it belongs
+   to the page and is always there. Both offsets derive from the corner tokens
+   (see the tokens block), so shrinking the plates moves this up with them. */
 #btn-hud-menu {
   position: absolute;
-  right: calc(var(--hud-menu-gap) - 44px + env(safe-area-inset-right, 0px));
+  right: calc(var(--corner-inset) + env(safe-area-inset-right, 0px));
   top: calc(env(safe-area-inset-top, 0px) + var(--hud-menu-top));
 }
 
@@ -1052,8 +1086,28 @@ html, body {
    shorter top bar. Touch targets stay at 44px — that minimum is never the thing
    that gets sacrificed. */
 @media (max-height: 520px) {
-  :root { --hud-menu-top: 54px; }                     /* the top bar is shorter here */
-  #hud-top { padding: 6px clamp(8px, 2.5vw, 14px); }
+  /* The corner cluster tightens with everything else, and the two numbers that
+     hang off it follow on their own: ☰ lands at 58px instead of the 54 this
+     block used to pin by hand, and the column the HUD reserves narrows to
+     112px. THE PLATES THEMSELVES DO NOT SHRINK. Every other game in the hub
+     takes its corner down to 38px sideways; here the 44px target is the one
+     thing this block has never been allowed to spend (tests/ui-layout.mjs
+     enforces it), so the strip gives up its padding and its distance from the
+     edge instead, and ☰ pays the four pixels. */
+  :root {
+    --corner-inset: 6px;
+    --corner-w: 98px;    /* 3 + 44 + 4 gap + 44 + 3 */
+    --corner-h: 50px;    /* 3 + 44 + 3 */
+  }
+  #corner-tools { padding: 3px; gap: 4px; }
+
+  /* The shorthand would reset the corner's reservation, so it is restated in
+     the same breath — the row must never run under the cluster, sideways least
+     of all, where there is the least height to lose to a second line. */
+  #hud-top {
+    padding: 6px clamp(8px, 2.5vw, 14px);
+    padding-right: calc(var(--hud-menu-gap) + env(safe-area-inset-right, 0px));
+  }
   #hud-toast { top: calc(env(safe-area-inset-top, 0px) + 46px); }
   #objective-meter, #budget-meter { display: none; }  /* the numbers carry it */
 

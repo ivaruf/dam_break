@@ -14,17 +14,24 @@ import * as sound from './sound.js';
 
 const el = (id) => document.getElementById(id);
 
-// The screen show() last raised, excluding the sound panel itself. The sound
-// panel is a door off whichever menu the player was standing on — title, level
-// select or result — so BACK has to know which one to put them back on, and the
-// phase cannot answer that: #btn-play raises the level select without ever
-// leaving the 'title' phase.
-let lastMenu = 'screen-title';
+// What show() last raised, INCLUDING `null`, which is what a run looks like:
+// during build and sim no .screen is up at all and the HUD has the canvas to
+// itself. The sound panel is a door off wherever the player was standing —
+// title, level select, result, or a level in progress, since the corner speaker
+// is on every one of them now — so BACK has to know which, and the phase cannot
+// answer it: #btn-play raises the level select without ever leaving the 'title'
+// phase.
+let current = 'screen-title';
+let soundReturn = null;
 
 function show(id) {
   for (const s of document.querySelectorAll('.screen')) s.classList.add('hidden');
   if (id) { const n = el(id); if (n) n.classList.remove('hidden'); }
-  if (id && id !== 'screen-sound') lastMenu = id;
+  current = id || null;
+  // Anything that raises another screen — a phase change, a level starting —
+  // has closed the sound panel by hiding it, so the way back out of it must not
+  // survive as a stale promise to return somewhere the player has left.
+  if (current !== 'screen-sound') soundReturn = null;
 }
 
 // ---- tutorial copy (level 1 only) ---------------------------------------
@@ -131,15 +138,35 @@ function dismissSplash() {
  *
  * They stay hidden unless the arcade's exit.js is actually there to answer,
  * because it is another repository's file and is allowed to be missing — and
- * a quit button that cannot quit is worse than no quit button at all. What
- * they SAY is its answer too: inside the arcade this goes back to the floor,
- * installed it closes the window, and in an ordinary tab no script may close
- * anything, so the button must not pretend otherwise.
+ * a quit button that cannot quit is worse than no quit button at all. They stay
+ * hidden in a plain tab too, for the reason spelled out below. What they SAY is
+ * exit.js's answer as well: inside the arcade this goes back to the floor, and
+ * installed it closes the window.
  */
 function wireQuit() {
   const exit = globalThis.ArcadeExit;
   if (!exit) return;
 
+  /* Whether to draw the button at all, which is NOT the same question as
+   * whether quit() could do something. In a plain tab it could — the arcade is
+   * a URL and a navigation always works — but somebody who typed this game's
+   * address, or followed a link to it, did not come from the arcade and may
+   * never have heard of it. So: a launcher behind us, or an installed window
+   * that can genuinely close itself.
+   *
+   * ASKED THROUGH framed()/standalone() AND NOT THROUGH offers(), even though
+   * offers() exists and says exactly this. exit.js is another repository's file
+   * and the copy that answers may be OLDER than this code: it is fetched from
+   * ../arcade/ and a service worker on this origin can hand back a version
+   * cached long before offers() was written. A guard built on the new name
+   * fails CLOSED when that happens — the way out simply disappears, inside the
+   * arcade, where it is the one control that matters. These two predicates have
+   * been in exit.js since the file existed. */
+  if (!(exit.framed() || exit.standalone())) return;
+
+  // The tab wording is unreachable behind the guard above and is handed over
+  // anyway: verb() answers the same three cases in the same order as quit(),
+  // and a label it cannot fill is an "undefined" printed on a button.
   const label = exit.verb({
     arcade: '◂ BACK TO ARCADE',
     app: '✕ CLOSE',
@@ -163,22 +190,12 @@ function wireQuit() {
   }
 }
 
-// ---- the corner cluster and the sound panel -----------------------------
-
-/**
- * Show the top-right cluster on the menus, and take it away for a run.
- *
- * This is the exact complement of hud.js's own `inGame` test, and it is
- * written the same way on purpose so the two cannot drift apart: the moment
- * #hud appears, #btn-hud-menu owns that corner, and two things cannot have
- * one corner. index.html carries the longer reasoning next to the markup.
- */
-function paintCorner(phase) {
-  const node = el('corner-tools');
-  if (!node) return;
-  const inGame = phase === 'build' || phase === 'sim';
-  node.classList.toggle('hidden', inGame);
-}
+// ---- the sound panel ----------------------------------------------------
+//
+// There is no paintCorner() any more, and deliberately none: #corner-tools is
+// fixed page chrome that nothing here shows or hides. It used to be taken away
+// for build and sim — index.html and styles.css both carry the reasoning for
+// why it is not, and why ☰ LEVELS moved one row down instead.
 
 /**
  * One fader. src/ui/sound.js owns the value and the storage; this owns nothing
@@ -210,14 +227,45 @@ function wireFader(inputId, outId, read, write) {
   });
 }
 
+/**
+ * Open the sound panel from wherever the player pressed the corner speaker.
+ *
+ * The speaker is on every screen now, so "back to the title" is only the right
+ * answer when the title is where they were: the screen showing at the moment
+ * the door opened is remembered instead, and `null` — a level in progress, with
+ * no .screen up at all — is a perfectly good thing to remember and return to.
+ *
+ * AND MID-RUN IT STOPS THE WATER. A menu that leaves the flood rising behind it
+ * is a menu that costs the player the level for looking at it: the valley does
+ * not pause itself the way a screen change pauses maxgear's, so opening this
+ * from 'sim' asks for speed 0 through the same ui:speed channel the ⏸ button
+ * uses, and leaves it there. Coming back lands on a stopped sim with ⏸ lit,
+ * never on a run that has been going without anybody watching — the player
+ * restarts it themselves with 1× or the spacebar. Build has nothing to stop.
+ */
+function openSound() {
+  if (current === 'screen-sound') return;
+  soundReturn = current;
+  if (getScene().phase === 'sim') emit('ui:speed', { v: 0 });
+  show('screen-sound');
+}
+
+/** The one way out of the panel, so BACK and Escape cannot leave by different
+ *  doors. Returns whether there was anything to close — game.js asks. */
+export function closeSound() {
+  if (current !== 'screen-sound') return false;
+  show(soundReturn);   // null means the run it was opened over
+  return true;
+}
+
 function wireSound() {
   wireFader('vol-music', 'vol-music-out', sound.music, sound.setMusic);
   wireFader('vol-sfx', 'vol-sfx-out', sound.sfx, sound.setSfx);
 
   const open = el('btn-sound');
-  if (open) open.addEventListener('click', () => show('screen-sound'));
+  if (open) open.addEventListener('click', openSound);
   const back = el('btn-sound-back');
-  if (back) back.addEventListener('click', () => show(lastMenu || 'screen-title'));
+  if (back) back.addEventListener('click', closeSound);
 }
 
 // ---- init ---------------------------------------------------------------
@@ -243,7 +291,6 @@ export function init() {
   el('btn-tut-next').addEventListener('click', () => { tutStep++; renderTutorial(); });
 
   on('phase:change', ({ phase }) => {
-    paintCorner(phase);
     if (phase === 'title') { hideTutorial(); show('screen-title'); }
     else if (phase === 'levelselect') { hideTutorial(); buildLevelGrid(); show('screen-levels'); }
     else if (phase === 'result') { hideTutorial(); showResult(); }

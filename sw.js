@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.10.1'; // the way out says what it does: back to arcade, or close
+const VERSION = 'v2.11.0'; // the corner belongs to the page: sound and fullscreen on every screen and mid-run, our own cache served, and no way out lost to a stale exit.js
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
@@ -78,8 +78,16 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   if (new URL(request.url).origin !== self.location.origin) return;
 
+  // `cacheName: CACHE` IS LOAD-BEARING AND WAS MISSING. A bare caches.match()
+  // searches EVERY cache on the origin, and every game in this hub shares one —
+  // so this was free to answer out of the arcade's cache or a sibling game's,
+  // and it did: ../arcade/exit.js is precached by the ARCADE, so the copy this
+  // game got came from a store no VERSION bump here could ever refresh. That is
+  // the same mistake as a sloppy cleanup filter, from the other end: the slug is
+  // on the cache name and then nothing asks for it. Scoped to our own cache, a
+  // miss falls through to the network below and the answer is at worst fresh.
   event.respondWith(
-    caches.match(request, { ignoreSearch: true }).then((hit) => {
+    caches.match(request, { cacheName: CACHE, ignoreSearch: true }).then((hit) => {
       if (hit) return hit;
       return fetch(request).then((res) => {
         if (res.ok && res.type === 'basic') {
@@ -87,7 +95,12 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE).then((c) => c.put(request, copy));
         }
         return res;
-      }).catch(() => (request.mode === 'navigate' ? caches.match('./index.html') : undefined));
+      }).catch(() => (request.mode === 'navigate'
+        // Scoped for the same reason: offline, the shell we fall back to must
+        // be OUR shell and not whichever game on this origin happens to hold an
+        // './index.html' of its own.
+        ? caches.match('./index.html', { cacheName: CACHE })
+        : undefined));
     })
   );
 });
