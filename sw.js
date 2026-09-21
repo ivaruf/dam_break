@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.11.0'; // the corner belongs to the page: sound and fullscreen on every screen and mid-run, our own cache served, and no way out lost to a stale exit.js
+const VERSION = 'v2.11.1'; // the exit-fullscreen glyph is symmetric again — its bottom-left arm pointed the wrong way
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
