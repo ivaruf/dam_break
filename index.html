@@ -22,6 +22,10 @@
      ours. Classic and deferred on purpose, so /arcade/ being unreachable
      costs the quit button rather than the whole page. -->
 <script src="../arcade/exit.js" defer></script>
+<!-- Selection and the long-press callout, cancelled outside a text field.
+     Classic and self-contained for the same reason exit.js is: nothing in
+     the module graph can take it down, and it can take nothing down. -->
+<script src="src/touch-guard.js" defer></script>
 <!-- The address change. Inert until gophercloud.games answers; see the file. -->
 <script src="moved.js" defer></script>
 </head>

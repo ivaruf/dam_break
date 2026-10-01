@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.11.1'; // the exit-fullscreen glyph is symmetric again — its bottom-left arm pointed the wrong way
+const VERSION = 'v2.11.2'; // a tablet stops treating the dam as text — no selection, no long-press callout, no double-tap zoom
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
@@ -16,6 +16,7 @@ const ASSETS = [
   './manifest.webmanifest',
   './styles.css',
   './src/main.js',
+  './src/touch-guard.js',
   './src/config.js',
   './src/core/game.js',
   './src/core/state.js',

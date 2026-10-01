@@ -89,9 +89,27 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
+  /* A game, not a document (hub CLAUDE.md §2). On a tablet a resting thumb
+     is a long press and a drag that starts on a level card or a HUD label is
+     a text selection, so Safari highlights words and offers Copy / Look Up
+     in the middle of laying a beam. Nothing selects and nothing opens a
+     callout; `manipulation` drops double-tap zoom and keeps pinch. The
+     canvas below goes further with touch-action:none, and
+     src/touch-guard.js is the half CSS is not honoured for everywhere. */
   -webkit-user-select: none;
   user-select: none;
+  -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+/* No text field ships today (the faders are ranges), but the day one does it
+   must be able to select what was typed in it. */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 #wrap { position: fixed; inset: 0; }
