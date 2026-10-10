@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nb">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -8,6 +8,18 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="description" content="Build a dam. Release the flood. Find out where it breaks.">
 <title>DAM BREAK</title>
+<!-- The language, before anything paints. Norwegian unless the player has
+     chosen English in this or any other arcade game (the shared key
+     arcade.lang.v1 — see src/i18n.js, which owns it from here on). Inline and
+     classic so the splash and the first frame are already in the right
+     language; the markup below carries bokmål, the default, and src/i18n.js
+     repaints it under the splash if the choice was English. -->
+<script>
+  try {
+    var l = localStorage.getItem('arcade.lang.v1');
+    if (l === 'en' || l === 'nb') document.documentElement.lang = l;
+  } catch (e) { /* no storage: stay Norwegian */ }
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="stylesheet" href="styles.css">
@@ -77,6 +89,8 @@
   background-image:repeating-linear-gradient(177deg,
     rgba(165,226,255,0) 0 14px,rgba(165,226,255,.26) 24px,rgba(165,226,255,0) 34px 74px)}
 #splash .sp-hint{font-size:12px;letter-spacing:.22em;color:#61798c;margin-top:16px}
+/* both words are in the markup; <html lang> (set in <head>) picks one */
+html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none}
 @keyframes sp-drift{from{transform:translateX(0)}to{transform:translateX(27.27%)}}
 @media (prefers-reduced-motion:reduce){#splash .sp-water span{animation:none}}
 </style>
@@ -84,7 +98,7 @@
   <div class="sp-water"><span></span><span></span></div>
   <div class="sp-word">DAM<span>BREAK</span></div>
   <div class="sp-rule"><i></i><i></i></div>
-  <p class="sp-hint">LOADING</p>
+  <p class="sp-hint"><span class="sp-nb" lang="nb">LASTER</span><span class="sp-en" lang="en">LOADING</span></p>
 </div>
 
 <div id="wrap">
@@ -101,24 +115,25 @@
 
       <div id="hud-timer" class="hidden">
         <span id="timer-text"></span>
-        <span class="hud-label">FLOOD ARRIVES</span>
+        <span class="hud-label" data-i18n="hud.floodArrives">FLOMMEN KOMMER</span>
       </div>
 
       <div id="hud-right">
         <div id="hud-budget">
           <span id="budget-left"></span>
-          <span class="hud-label">LEFT OF <span id="budget-total"></span></span>
+          <span class="hud-label"><span data-i18n="hud.leftOf">IGJEN AV</span> <span id="budget-total"></span></span>
           <div id="budget-meter" class="meter"><i id="budget-fill"></i></div>
         </div>
         <div id="hud-readouts" class="hidden">
-          <div class="readout"><span id="stat-load">—</span><span class="hud-label">PEAK LOAD</span></div>
-          <div class="readout"><span id="stat-retained">—</span><span class="hud-label">HELD</span></div>
+          <div class="readout"><span id="stat-load">—</span><span class="hud-label" data-i18n="hud.peakLoad">MAKS LAST</span></div>
+          <div class="readout"><span id="stat-retained">—</span><span class="hud-label" data-i18n="hud.held">HOLDT</span></div>
         </div>
       </div>
     </div>
 
     <div id="hud-toast" aria-live="polite"></div>
-    <button id="btn-hud-menu" class="tool-btn" type="button" title="Levels (Esc)" aria-label="Levels">☰</button>
+    <button id="btn-hud-menu" class="tool-btn" type="button" title="Nivåer (Esc)" aria-label="Nivåer"
+            data-i18n-label="hud.menu" data-i18n-title="hud.menuTitle">☰</button>
 
     <!-- ==================== THE BOTTOM STACK ====================
          One bottom-anchored flex column owns EVERYTHING at the foot of the
@@ -143,8 +158,8 @@
           <p id="tut-text"></p>
           <div class="tut-foot">
             <div id="tut-dots" class="tut-dots"></div>
-            <button class="small-btn ghost-btn" id="btn-tut-skip" type="button">SKIP</button>
-            <button class="small-btn primary-btn" id="btn-tut-next" type="button">GOT IT →</button>
+            <button class="small-btn ghost-btn" id="btn-tut-skip" type="button" data-i18n="tut.skip">HOPP OVER</button>
+            <button class="small-btn primary-btn" id="btn-tut-next" type="button">SKJØNNER →</button>
           </div>
         </div>
       </div>
@@ -160,7 +175,8 @@
         <!-- (b) TOOLS — fixed, never scrolled, never under the release button. -->
         <div id="tool-group">
           <button id="btn-tool-build" class="tool-btn" type="button"
-                  title="Build beams — drag between anchors" aria-label="Build beams">
+                  title="Bygg bjelker — dra mellom ankerpunktene" aria-label="Bygg bjelker"
+                  data-i18n-label="tool.build" data-i18n-title="tool.buildTitle">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M6 18 18 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/>
               <circle cx="6" cy="18" r="2.7" fill="currentColor"/>
@@ -168,7 +184,8 @@
             </svg>
           </button>
           <button id="btn-erase" class="tool-btn danger" type="button"
-                  title="Erase — drag across beams to delete them (E)" aria-label="Erase">
+                  title="Visk ut — dra over bjelker for å fjerne dem (E)" aria-label="Visk ut"
+                  data-i18n-label="tool.erase" data-i18n-title="tool.eraseTitle">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M9.4 19.5 4.6 14.7a1.6 1.6 0 0 1 0-2.3l7.6-7.6a1.6 1.6 0 0 1 2.3 0l4.8 4.8a1.6 1.6 0 0 1 0 2.3l-7.7 7.6z"
                     fill="none" stroke="currentColor" stroke-width="1.7"/>
@@ -179,7 +196,8 @@
           <!-- NEW: box delete. Dashed square with an ×, because that is exactly
                what the tool draws on the world (renderer.drawMarquee). -->
           <button id="btn-boxdelete" class="tool-btn danger" type="button"
-                  title="Box delete — drag a box over a section to delete it (X)" aria-label="Box delete">
+                  title="Slett med boks — dra en boks over en del for å fjerne den (X)" aria-label="Slett med boks"
+                  data-i18n-label="tool.box" data-i18n-title="tool.boxTitle">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <rect x="3.4" y="3.4" width="17.2" height="17.2" rx="2.2" fill="none"
                     stroke="currentColor" stroke-width="1.6" stroke-dasharray="3.4 2.7"/>
@@ -188,22 +206,22 @@
             </svg>
           </button>
           <span class="tool-sep" aria-hidden="true"></span>
-          <button id="btn-undo" class="tool-btn" type="button" title="Undo (Z)" aria-label="Undo">↶</button>
-          <button id="btn-redo" class="tool-btn" type="button" title="Redo (Y)" aria-label="Redo">↷</button>
-          <button id="btn-clear" class="tool-btn" type="button" title="Clear the whole dam" aria-label="Clear the whole dam">🗑</button>
+          <button id="btn-undo" class="tool-btn" type="button" title="Angre (Z)" aria-label="Angre" data-i18n-label="tool.undo" data-i18n-title="tool.undoTitle">↶</button>
+          <button id="btn-redo" class="tool-btn" type="button" title="Gjør om (Y)" aria-label="Gjør om" data-i18n-label="tool.redo" data-i18n-title="tool.redoTitle">↷</button>
+          <button id="btn-clear" class="tool-btn" type="button" title="Fjern hele demningen" aria-label="Fjern hele demningen" data-i18n-label="tool.clear">🗑</button>
         </div>
 
-        <button id="btn-release" class="big-btn release hidden" type="button">⚠ RELEASE WATER</button>
+        <button id="btn-release" class="big-btn release hidden" type="button" data-i18n="hud.release">⚠ SLIPP VANNET</button>
       </div>
 
       <div id="sim-controls" class="hidden">
-        <button class="speed-btn" data-speed="0" type="button" aria-label="Pause">⏸</button>
+        <button class="speed-btn" data-speed="0" type="button" aria-label="Pause" data-i18n-label="sim.pause">⏸</button>
         <button class="speed-btn" data-speed="0.25" type="button">¼×</button>
         <button class="speed-btn active" data-speed="1" type="button">1×</button>
         <button class="speed-btn" data-speed="2" type="button">2×</button>
         <button class="speed-btn" data-speed="4" type="button">4×</button>
-        <button id="btn-sim-retry" class="tool-btn" type="button" title="Retry (R)" aria-label="Retry">↻</button>
-        <button id="btn-sim-edit" class="tool-btn" type="button" title="Edit dam" aria-label="Edit dam">✎</button>
+        <button id="btn-sim-retry" class="tool-btn" type="button" title="Prøv igjen (R)" aria-label="Prøv igjen" data-i18n-label="sim.retry" data-i18n-title="sim.retryTitle">↻</button>
+        <button id="btn-sim-edit" class="tool-btn" type="button" title="Endre demningen" aria-label="Endre demningen" data-i18n-label="sim.edit">✎</button>
       </div>
     </div>
   </div>
@@ -216,29 +234,63 @@
     <div class="logo">
       <h1>DAM<span class="accent">BREAK</span></h1>
       <div class="logo-rule" aria-hidden="true"><i></i><i></i></div>
-      <p class="tagline">When the water arrives — will your dam hold?</p>
+      <p class="tagline" data-i18n="title.tagline">Når vannet kommer — holder demningen din?</p>
     </div>
-    <button class="big-btn pulse" id="btn-play" type="button">▶ PLAY</button>
-    <button class="small-btn" id="btn-sandbox" type="button">⚒ SANDBOX</button>
-    <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ UPDATE READY</button>
+    <button class="big-btn pulse" id="btn-play" type="button" data-i18n="title.play">▶ SPILL</button>
+    <button class="small-btn" id="btn-sandbox" type="button" data-i18n="title.sandbox">⚒ SANDKASSE</button>
+    <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ NY VERSJON KLAR</button>
     <!-- Leaving the game itself. Stays hidden until screens.js knows what it
          can honestly offer — back to the arcade, or closing a window a script
          is actually allowed to close. See ../arcade/exit.js. -->
     <button class="small-btn quit-btn hidden" id="btn-quit" type="button"></button>
-    <p class="hint">Drag to build · pinch or wheel to zoom · Space to release the flood</p>
+    <p class="hint" data-i18n="title.hint">Dra for å bygge · knip eller rull for å zoome · mellomrom slipper flommen</p>
     <span id="game-version" class="version-tag"></span>
   </div>
 
   <div id="screen-levels" class="screen hidden">
     <div class="screen-head">
-      <h2>SELECT LEVEL</h2>
+      <h2 data-i18n="levels.title">VELG NIVÅ</h2>
       <p id="levels-progress" class="tagline"></p>
     </div>
     <div id="level-grid"></div>
-    <button class="small-btn" id="btn-levels-back" type="button">BACK</button>
-    <!-- The same way out, repeated here because this screen is what the in-game
-         ☰ opens: leaving should never be three taps deep. -->
-    <button class="small-btn quit-btn hidden" id="btn-quit-levels" type="button"></button>
+    <!-- The foot of the level screen: language, BACK and the way out, in one
+         box so the short-landscape pass can lay them in a row instead of
+         stacking three 44px rows under a grid that needs the height. -->
+    <div class="levels-foot">
+      <!-- The same language row, because this screen is what the HUD's ☰ opens.
+           Its flag ids end -b; the sound panel's end -a. -->
+      <div class="lang-row lang-row-levels">
+        <span class="vol-label" id="lang-label-b" data-i18n="menu.lang">SPRÅK</span>
+        <div class="lang-seg" role="group" aria-labelledby="lang-label-b">
+          <button type="button" class="lang-btn" data-lang="nb" lang="nb" aria-pressed="true">
+            <svg class="flag" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
+              <rect width="22" height="16" fill="#ba0c2f"/>
+              <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
+              <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
+            </svg>
+            <span>Norsk</span>
+          </button>
+          <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">
+            <svg class="flag" viewBox="0 0 60 30" aria-hidden="true" focusable="false">
+              <clipPath id="uk-clip-b"><path d="M0 0v30h60V0z"/></clipPath>
+              <clipPath id="uk-diag-b"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
+              <g clip-path="url(#uk-clip-b)">
+                <path d="M0 0v30h60V0z" fill="#012169"/>
+                <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
+                <path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-diag-b)" stroke="#c8102e" stroke-width="4"/>
+                <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
+                <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
+              </g>
+            </svg>
+            <span>English</span>
+          </button>
+        </div>
+      </div>
+      <button class="small-btn" id="btn-levels-back" type="button" data-i18n="menu.back">TILBAKE</button>
+      <!-- The same way out, repeated here because this screen is what the in-game
+           ☰ opens: leaving should never be three taps deep. -->
+      <button class="small-btn quit-btn hidden" id="btn-quit-levels" type="button"></button>
+    </div>
   </div>
 
   <!-- ==================== SOUND ====================
@@ -254,50 +306,84 @@
   <div id="screen-sound" class="screen hidden">
     <div class="end-card sound-card">
       <div class="screen-head">
-        <h2>SOUND</h2>
-        <p class="tagline">Nothing to hear yet.</p>
+        <h2 data-i18n="sound.title">LYD</h2>
+        <p class="tagline" data-i18n="sound.tagline">Ingenting å høre ennå.</p>
       </div>
 
-      <!-- One wrapper around both rows so the short-landscape pass can stand
-           the whole pair beside the text as a single grid area, without any
-           of this markup moving. -->
+      <!-- One wrapper around all three rows — the two faders and the language
+           — so the short-landscape pass can stand the whole set beside the
+           text as a single grid area, without any of this markup moving. The
+           language row shares the faders' label gutter, so SPRÅK, MUSIKK and
+           EFFEKTER all start their controls at the same x. -->
       <div class="vol-rows">
         <div class="vol-row">
-          <label class="vol-label" for="vol-music">MUSIC</label>
+          <label class="vol-label" for="vol-music" data-i18n="sound.music">MUSIKK</label>
           <div class="vol-slider">
             <input type="range" id="vol-music" min="0" max="100" step="1" value="60">
             <output id="vol-music-out" for="vol-music">60</output>
           </div>
         </div>
         <div class="vol-row">
-          <label class="vol-label" for="vol-sfx">EFFECTS</label>
+          <label class="vol-label" for="vol-sfx" data-i18n="sound.sfx">EFFEKTER</label>
           <div class="vol-slider">
             <input type="range" id="vol-sfx" min="0" max="100" step="1" value="80">
             <output id="vol-sfx-out" for="vol-sfx">80</output>
           </div>
         </div>
+        <!-- THE LANGUAGE ROW (hub §2, "Two languages, Norwegian first").
+             Here because this panel is what the corner speaker opens from the
+             title screen, so a stranger finds English before a single level.
+             The flags are kitchens' two SVGs to the path; the clipPath ids
+             carry a suffix, because the same row is repeated on the level
+             screen and ids are page-global. Endonyms stay in their own
+             language whatever the current one is. -->
+        <div class="vol-row lang-row">
+          <span class="vol-label" id="lang-label-a" data-i18n="menu.lang">SPRÅK</span>
+          <div class="lang-seg" role="group" aria-labelledby="lang-label-a">
+            <button type="button" class="lang-btn" data-lang="nb" lang="nb" aria-pressed="true">
+              <svg class="flag" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
+                <rect width="22" height="16" fill="#ba0c2f"/>
+                <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
+                <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
+              </svg>
+              <span>Norsk</span>
+            </button>
+            <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">
+              <svg class="flag" viewBox="0 0 60 30" aria-hidden="true" focusable="false">
+                <clipPath id="uk-clip-a"><path d="M0 0v30h60V0z"/></clipPath>
+                <clipPath id="uk-diag-a"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
+                <g clip-path="url(#uk-clip-a)">
+                  <path d="M0 0v30h60V0z" fill="#012169"/>
+                  <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
+                  <path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-diag-a)" stroke="#c8102e" stroke-width="4"/>
+                  <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
+                  <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
+                </g>
+              </svg>
+              <span>English</span>
+            </button>
+          </div>
+        </div>
+
       </div>
 
-      <p class="hint sound-note">⚠ DAM BREAK ships silent — no music, no cues,
-        nothing these two sliders can move today. They are saved to this device
-        anyway, so when the water finally gets a voice it arrives at the level
-        you chose rather than at full blast.</p>
+      <p class="hint sound-note" data-i18n="sound.note">⚠ DAM BREAK er helt stille — ingen musikk, ingen lyder, ingenting disse to glidebryterne kan skru på i dag. De blir likevel lagret på denne enheten, så når vannet en dag får en stemme, kommer den på nivået du valgte og ikke på full guffe.</p>
 
-      <button class="small-btn" id="btn-sound-back" type="button">BACK</button>
+      <button class="small-btn" id="btn-sound-back" type="button" data-i18n="menu.back">TILBAKE</button>
     </div>
   </div>
 
   <div id="screen-result" class="screen hidden">
     <div class="end-card">
-      <h2 id="result-heading">DAM TEST COMPLETE</h2>
+      <h2 id="result-heading"></h2>
       <p id="result-cause" class="tagline hidden"></p>
       <p id="result-note" class="result-note hidden"></p>
       <div id="result-stats" class="end-stats"></div>
       <div class="result-btns">
-        <button class="big-btn" id="btn-result-retry" type="button">↻ RETRY</button>
-        <button class="small-btn" id="btn-result-edit" type="button">✎ EDIT DAM</button>
-        <button class="small-btn" id="btn-result-next" type="button">NEXT LEVEL →</button>
-        <button class="small-btn" id="btn-result-menu" type="button">LEVELS</button>
+        <button class="big-btn" id="btn-result-retry" type="button" data-i18n="result.retry">↻ PRØV IGJEN</button>
+        <button class="small-btn" id="btn-result-edit" type="button" data-i18n="result.edit">✎ ENDRE</button>
+        <button class="small-btn" id="btn-result-next" type="button">NESTE NIVÅ →</button>
+        <button class="small-btn" id="btn-result-menu" type="button" data-i18n="result.levels">NIVÅER</button>
       </div>
     </div>
   </div>
@@ -329,7 +415,7 @@
        the right answer, and the cluster must not depend on a boot that it
        exists to outlive. -->
   <div id="corner-tools">
-    <button id="btn-sound" class="tool-btn" type="button" title="Sound" aria-label="Sound">
+    <button id="btn-sound" class="tool-btn" type="button" title="Lyd" aria-label="Lyd" data-i18n-label="corner.sound">
       <!-- A speaker and two waves. Deliberately WITHOUT a slash: this opens a
            panel, it is not a mute toggle. -->
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -344,7 +430,7 @@
          nothing when pressed is worse than no button. The cluster just
          shrinks to one icon there. -->
     <button id="btn-screen" class="tool-btn" type="button" aria-pressed="false"
-            title="Fullscreen" aria-label="Fullscreen" hidden>
+            title="Fullskjerm" aria-label="Fullskjerm" hidden>
       <!-- Four corners pushing out, and the same four pulled in for the
            pressed state. CSS picks between them off aria-pressed, so the
            picture and the label can never disagree. -->

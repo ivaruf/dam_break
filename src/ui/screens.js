@@ -11,6 +11,7 @@ import { LEVELS } from '../levels/levels.js';
 import { isUnlocked, bestFor } from '../core/state.js';
 import { getScene } from '../core/game.js';
 import * as sound from './sound.js';
+import { t, getLang, setLang, paintStatic, levelName, levelSub } from '../i18n.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -36,27 +37,9 @@ function show(id) {
 
 // ---- tutorial copy (level 1 only) ---------------------------------------
 
-const TUTORIAL = [
-  {
-    title: 'Tap an anchor, then tap in the circle',
-    text: 'Every beam starts on a yellow anchor or a joint you have already built. ' +
-      'Tap one and a circle appears: everywhere lit inside it is somewhere this beam ' +
-      'can reach. Tap anywhere lit and the beam is built. Two taps, every time — to ' +
-      'keep going, tap the joint you just made. (A drag does the same in one go.) ' +
-      'Dark means the ground or the zone is in the way; amber means you cannot afford ' +
-      'that far. The \u2922-style button zooms to the build site.',
-  },
-  {
-    title: 'Triangles hold, squares fold',
-    text: 'Pick a material below (or press 1–4). Every beam costs its length × its price ' +
-      'per metre. Brace your wall with diagonals — a square frame just folds over.',
-  },
-  {
-    title: 'Then release the water',
-    text: 'Hit RELEASE WATER when you are ready. Watch the beams: cool blue means being ' +
-      'pulled, warm orange means being crushed. Flashing with cracks means about to fail.',
-  },
-];
+// The words are src/i18n.js's tut.<n>.title / tut.<n>.text; this is only how
+// many steps there are.
+const TUTORIAL_STEPS = 3;
 
 let tutStep = 0;
 
@@ -85,17 +68,16 @@ function clearToasts() {
 function renderTutorial() {
   const node = el('tutorial');
   if (!node) return;
-  const s = TUTORIAL[tutStep];
-  if (!s) { markTutSeen(); hideTutorial(); return; }
-  el('tut-step').textContent = 'STEP ' + (tutStep + 1) + ' OF ' + TUTORIAL.length;
-  el('tut-title').textContent = s.title;
-  el('tut-text').textContent = s.text;
-  el('btn-tut-next').textContent = tutStep === TUTORIAL.length - 1 ? 'BUILD IT →' : 'GOT IT →';
+  if (tutStep >= TUTORIAL_STEPS) { markTutSeen(); hideTutorial(); return; }
+  el('tut-step').textContent = t('tut.step', tutStep + 1, TUTORIAL_STEPS);
+  el('tut-title').textContent = t('tut.' + tutStep + '.title');
+  el('tut-text').textContent = t('tut.' + tutStep + '.text');
+  el('btn-tut-next').textContent = t(tutStep === TUTORIAL_STEPS - 1 ? 'tut.last' : 'tut.next');
 
   const dots = el('tut-dots');
-  if (dots.childElementCount !== TUTORIAL.length) {
+  if (dots.childElementCount !== TUTORIAL_STEPS) {
     dots.innerHTML = '';
-    for (let i = 0; i < TUTORIAL.length; i++) dots.appendChild(document.createElement('span'));
+    for (let i = 0; i < TUTORIAL_STEPS; i++) dots.appendChild(document.createElement('span'));
   }
   let i = 0;
   for (const d of dots.children) { d.classList.toggle('on', i === tutStep); i++; }
@@ -164,28 +146,75 @@ function wireQuit() {
    * been in exit.js since the file existed. */
   if (!(exit.framed() || exit.standalone())) return;
 
-  // The tab wording is unreachable behind the guard above and is handed over
-  // anyway: verb() answers the same three cases in the same order as quit(),
-  // and a label it cannot fill is an "undefined" printed on a button.
-  const label = exit.verb({
-    arcade: '◂ BACK TO ARCADE',
-    app: '✕ CLOSE',
-    tab: '✕ CLOSE',
-  });
-
   for (const id of ['btn-quit', 'btn-quit-levels']) {
     const button = el(id);
     if (!button) continue; // the stub DOM in tests/ carries only what it needs
-    button.textContent = label;
+    quitButtons.push(button);
     button.classList.remove('hidden');
     button.addEventListener('click', () => {
       exit.quit().then((how) => {
         // Refused: the browser will not close a window it did not open. Say so
         // where the button is rather than leaving a dead control on screen.
         if (how !== 'refused') return;
-        button.textContent = 'CLOSE THIS TAB YOURSELF';
+        button.dataset.refused = '1';
         button.disabled = true;
+        paintQuit();
       });
+    });
+  }
+  paintQuit();
+}
+
+const quitButtons = [];
+
+/* The words on the way out, in the current language — run again on every
+ * switch. The tab wording is unreachable behind the guard in wireQuit() and is
+ * handed over anyway: verb() answers the same three cases in the same order as
+ * quit(), and a label it cannot fill is an "undefined" printed on a button. */
+function paintQuit() {
+  const exit = globalThis.ArcadeExit;
+  if (!exit || !quitButtons.length) return;
+  const label = exit.verb({
+    arcade: t('exit.arcade'),
+    app: t('exit.close'),
+    tab: t('exit.close'),
+  });
+  for (const b of quitButtons) b.textContent = b.dataset.refused ? t('exit.refused') : label;
+}
+
+// ---- the language row -----------------------------------------------------
+//
+// Two copies of it, both plain markup in index.html: one in the sound panel —
+// the panel the corner speaker opens from the title screen, from the level
+// list and mid-run, so a stranger can find English before a single level —
+// and one on the level screen, which is what the HUD's ☰ opens. Every
+// [data-lang] button in the page is wired here; aria-pressed is the only state
+// and CSS reads it.
+function paintLangButtons() {
+  const lang = getLang();
+  for (const b of document.querySelectorAll('[data-lang]')) {
+    if (typeof b.setAttribute === 'function') b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+  }
+}
+
+function wireLang() {
+  for (const b of document.querySelectorAll('[data-lang]')) {
+    b.addEventListener('click', () => setLang(b.dataset.lang));
+  }
+  paintLangButtons();
+
+  // A switch repaints in place: no screen changes, no run is touched, the sound
+  // panel (which paused the flood when it opened) stays open and paused.
+  // i18n.js has already repainted every [data-i18n]; what is built here at
+  // runtime is rebuilt here.
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('arcade:lang', () => {
+      paintLangButtons();
+      paintQuit();
+      const tut = el('tutorial');
+      if (tut && !tut.classList.contains('hidden')) renderTutorial();
+      buildLevelGrid();
+      if (getScene().phase === 'result') paintResult();
     });
   }
 }
@@ -271,6 +300,9 @@ function wireSound() {
 // ---- init ---------------------------------------------------------------
 
 export function init() {
+  // Words before curtain: the static markup is painted in the stored language
+  // while the splash still covers it, so nothing is ever seen in the wrong one.
+  paintStatic(document);
   dismissSplash();
 
   el('btn-play').addEventListener('click', () => { buildLevelGrid(); show('screen-levels'); });
@@ -286,6 +318,7 @@ export function init() {
 
   wireQuit();
   wireSound();
+  wireLang();
 
   el('btn-tut-skip').addEventListener('click', () => { markTutSeen(); hideTutorial(); });
   el('btn-tut-next').addEventListener('click', () => { tutStep++; renderTutorial(); });
@@ -319,17 +352,10 @@ function money(v) {
   return '$' + s + out;
 }
 
-// "Ten valleys. One rising river." reads better than "10 valleys." — but the
-// count is derived from LEVELS now, so it has to survive someone adding a level.
-const NUMBERS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
-  'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen',
-  'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen', 'Twenty'];
-function words(n) { return NUMBERS[n] !== undefined ? NUMBERS[n] : String(n); }
-
 function badgeFor(lv) {
-  if (lv.id === 'sandbox') return { cls: 'sandbox', text: 'SANDBOX' };
-  if (lv.mode === 'countdown') return { cls: 'countdown', text: 'COUNTDOWN' };
-  return { cls: 'freebuild', text: 'FREE BUILD' };
+  if (lv.id === 'sandbox') return { cls: 'sandbox', text: t('badge.sandbox') };
+  if (lv.mode === 'countdown') return { cls: 'countdown', text: t('badge.countdown') };
+  return { cls: 'freebuild', text: t('badge.freebuild') };
 }
 
 // Small helper so every element in a card is built the same way.
@@ -369,7 +395,7 @@ function levelCard(lv, index, locked, best) {
     attr('aria-disabled', 'true');
   }
 
-  const name = locked ? 'LOCKED' : (lv.name || 'Level ' + index);
+  const name = locked ? t('levels.locked') : (levelName(lv) || t('levels.level', index));
   const b = badgeFor(lv);
 
   // Row 1 of the grid: the name, then the tag cluster. The tags live in ONE
@@ -378,7 +404,7 @@ function levelCard(lv, index, locked, best) {
   head.appendChild(span('level-name', name));
   const tags = span('level-tags');
   tags.appendChild(span('badge ' + b.cls, b.text));
-  if (best) tags.appendChild(span('level-best', 'BEST ' + money(best.cost)));
+  if (best) tags.appendChild(span('level-best', t('levels.best', money(best.cost))));
   // A real element, not the old absolutely-positioned ::after that sat on top
   // of the badge.
   if (locked) tags.appendChild(span('level-lock', '🔒'));
@@ -387,14 +413,14 @@ function levelCard(lv, index, locked, best) {
   // Row 2: the subtitle. Its own grid row, so it wraps INSIDE the card however
   // long it is and whatever else is on row 1.
   const sub = span('level-sub', locked
-    ? 'Clear level ' + (index - 1) + ' to open this one.'
-    : (lv.subtitle || ''));
+    ? t('levels.unlockHint', index - 1)
+    : levelSub(lv));
 
   card.append(span('level-num', lv.id === 'sandbox' ? '∞' : String(index)), head, sub);
 
   // One label for assistive tech instead of five loose fragments.
-  attr('aria-label', (lv.id === 'sandbox' ? 'Sandbox' : 'Level ' + index) + ': ' + name
-    + (locked ? ' — locked' : '') + (best ? ' — best ' + money(best.cost) : ''));
+  attr('aria-label', (lv.id === 'sandbox' ? t('levels.sandbox') : t('levels.level', index)) + ': ' + name
+    + (locked ? t('levels.ariaLocked') : '') + (best ? t('levels.ariaBest', money(best.cost)) : ''));
 
   if (!locked) {
     const go = () => emit('ui:level', { index });
@@ -435,32 +461,18 @@ function buildLevelGrid() {
     // Belt as well as braces: a save file from an older build (or a renamed
     // level) must still never be able to print more cleared than there are.
     const done = Math.min(cleared, total);
-    prog.textContent = done > 0
-      ? done + ' of ' + total + ' dams standing'
-      : words(total) + ' valleys. One rising river.';
+    // "Ten valleys. One rising river." reads better than "10 valleys." — the
+    // count is derived from LEVELS, so i18n.js spells it from a table.
+    prog.textContent = done > 0 ? t('levels.progress', done, total) : t('levels.intro', total);
   }
 }
 
 // ---- result -------------------------------------------------------------
 
-// Turn a failure cause into one actionable sentence. modes.js writes causes in
-// upper case with a leading keyword, which is what we match on.
-function coaching(cause) {
-  const c = String(cause || '').toUpperCase();
-  if (c.indexOf('OVERTOP') >= 0) return 'The reservoir rose over your crest. Build higher, or give the water a spillway.';
-  if (c.indexOf('BREACH') >= 0) return 'Water found a gap. Sealing beams must touch each other — cables seal nothing.';
-  // The two v2.1 processes come BEFORE the axial modes: a bending or creep break
-  // is not a tension/compression story, and the advice is completely different.
-  if (c.indexOf('SUSTAINED') >= 0) return 'It was holding right at the edge — sustained pressure eats weak material. Add margin, or build the wet face from something stronger.';
-  if (c.indexOf('MIDSPAN') >= 0) return 'Long spans snap in the middle — stand a pier under the face or use steel.';
-  if (c.indexOf('TENSION') >= 0) return 'Something was pulled apart. Steel and cable are strongest in tension.';
-  if (c.indexOf('COMPRESSION') >= 0) return 'Something was crushed. Shorten the span or brace it — long beams buckle.';
-  if (c.indexOf('COLLAPSE') >= 0) return 'One failure took the rest with it. Triangulate so no single beam is critical.';
-  if (c.indexOf('SLID') >= 0) return 'The dam moved bodily. Tie it to anchors on both banks.';
-  if (c.indexOf('NOTHING WAS BUILT') >= 0) return 'Tap an anchor, then tap inside the circle to place your first beam.';
-  if (c.indexOf('RETAINED') >= 0) return 'Close. Seal the leaks and raise the crest a little.';
-  if (c.indexOf('FLOODED DOWNSTREAM') >= 0) return 'The village took water. Route the overflow away from it.';
-  return '';
+// One actionable sentence under the cause line. modes.js names the advice that
+// goes with each cause (causeMsg.coach); the words are in src/i18n.js.
+function coaching(msg) {
+  return msg && msg.coach ? t(msg.coach) : '';
 }
 
 function statRow(host, key, value, cls) {
@@ -474,6 +486,14 @@ function statRow(host, key, value, cls) {
 }
 
 function showResult() {
+  paintResult();
+  show('screen-result');
+}
+
+// Everything on the result card, in the current language. Separate from
+// showResult() so a language switch can repaint the card where it stands —
+// including while the sound panel is open over it — without raising anything.
+function paintResult() {
   const S = getScene();
   const st = S.stats || {};
   const win = !!st.win;
@@ -481,13 +501,14 @@ function showResult() {
   const obj = level.objective || {};
 
   const head = el('result-heading');
-  head.textContent = win ? 'DAM HELD' : 'DAM FAILED';
+  head.textContent = t(win ? 'result.held' : 'result.failed');
   head.classList.toggle('win', win);
   head.classList.toggle('fail', !win);
 
   const cause = el('result-cause');
-  cause.textContent = st.cause || '';
-  cause.classList.toggle('hidden', win || !st.cause);
+  const causeText = st.causeMsg ? t(st.causeMsg.key, ...st.causeMsg.args) : (st.cause || '');
+  cause.textContent = causeText;
+  cause.classList.toggle('hidden', win || !causeText);
 
   const note = el('result-note');
   let noteText = '';
@@ -495,13 +516,13 @@ function showResult() {
     const best = bestFor(level.id);
     const next = S.levelIndex + 1;
     if (best && st.cost !== undefined && Math.round(best.cost) >= Math.round(st.cost)) {
-      noteText = 'New best cost: ' + money(st.cost) + '.';
+      noteText = t('result.newBest', money(st.cost));
     }
     if (next <= LEVELS.length && isUnlocked(next) && LEVELS[next - 1]) {
-      noteText += (noteText ? ' ' : '') + 'Unlocked: ' + LEVELS[next - 1].name + '.';
+      noteText += (noteText ? ' ' : '') + t('result.unlocked', levelName(LEVELS[next - 1]));
     }
   } else {
-    noteText = coaching(st.cause);
+    noteText = coaching(st.causeMsg);
   }
   note.textContent = noteText;
   note.classList.toggle('hidden', !noteText);
@@ -511,16 +532,16 @@ function showResult() {
 
   const need = obj.minRetention;
   const retained = st.retained !== undefined ? st.retained : 1;
-  statRow(host, 'Water retained', Math.round(retained * 100) + '%',
+  statRow(host, t('stat.retained'), Math.round(retained * 100) + '%',
     need !== undefined ? (retained >= need ? 'good' : 'bad') : '');
-  if (need !== undefined) statRow(host, 'Retention needed', Math.round(need * 100) + '%');
-  statRow(host, 'Peak reservoir depth', (st.peakDepth || 0).toFixed(1) + ' m');
-  statRow(host, 'Maximum stress', Math.round((st.maxLoad || 0) * 100) + '%',
+  if (need !== undefined) statRow(host, t('stat.needed'), Math.round(need * 100) + '%');
+  statRow(host, t('stat.depth'), (st.peakDepth || 0).toFixed(1) + ' m');
+  statRow(host, t('stat.stress'), Math.round((st.maxLoad || 0) * 100) + '%',
     (st.maxLoad || 0) >= 1 ? 'bad' : (st.maxLoad || 0) >= CONFIG.render.stressBarWarn ? 'warn' : 'good');
-  statRow(host, 'Members broken', String(st.brokenCount || 0),
+  statRow(host, t('stat.broken'), String(st.brokenCount || 0),
     (st.brokenCount || 0) > 0 ? 'warn' : 'good');
-  statRow(host, 'Construction cost', money(st.cost || 0));
-  statRow(host, 'Survival time', (st.survivalTime || 0).toFixed(1) + ' s'
+  statRow(host, t('stat.cost'), money(st.cost || 0));
+  statRow(host, t('stat.time'), (st.survivalTime || 0).toFixed(1) + ' s'
     + (obj.duration ? ' / ' + obj.duration + ' s' : ''));
 
   const next = S.levelIndex + 1;
@@ -528,14 +549,12 @@ function showResult() {
   const nextBtn = el('btn-result-next');
   nextBtn.disabled = !canNext;
   nextBtn.textContent = canNext && LEVELS[next - 1]
-    ? 'NEXT: ' + LEVELS[next - 1].name.toUpperCase() + ' →'
-    : 'NEXT LEVEL →';
+    ? t('result.nextNamed', levelName(LEVELS[next - 1]).toUpperCase())
+    : t('result.next');
 
   // a win makes RETRY the secondary action and NEXT the obvious one
   el('btn-result-retry').classList.toggle('big-btn', !win);
   el('btn-result-retry').classList.toggle('small-btn', win);
   nextBtn.classList.toggle('big-btn', win && canNext);
   nextBtn.classList.toggle('small-btn', !(win && canNext));
-
-  show('screen-result');
 }

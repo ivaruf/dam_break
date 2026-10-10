@@ -13,6 +13,7 @@ import { CONFIG } from '../config.js';
 import { designCost, getBuilder, canUndo, canRedo, getHint } from '../build/builder.js';
 import { MATERIALS } from '../build/materials.js';
 import * as modes from '../build/modes.js';
+import { t, tOr, levelName, levelHint } from '../i18n.js';
 
 const R = CONFIG.render;
 const el = (id) => document.getElementById(id);
@@ -83,11 +84,24 @@ export function init() {
     window.addEventListener('orientationchange', stripFade);
   }
 
-  on('level:win', () => toast('DAM HELD', 'win'));
-  on('level:fail', () => toast('DAM FAILED', 'fail'));
-  on('breach', () => eventToast('BREACH'));
-  on('overtop', () => eventToast('OVERTOPPING'));
+  on('level:win', () => toast(t('toast.held'), 'win'));
+  on('level:fail', () => toast(t('toast.failed'), 'fail'));
+  on('breach', () => eventToast(t('toast.breach')));
+  on('overtop', () => eventToast(t('toast.overtop')));
   on('sim:start', () => { last.speed = -1; });
+
+  // A language switch (src/i18n.js). Every string this file writes is cached
+  // in `last` so a frame that changes nothing writes nothing — so forget the
+  // cached words, and the very next frame writes them again in the new
+  // language. The material bar is rebuilt from scratch for the same reason.
+  // Nothing else is touched: the run, the speed, the tool all carry on.
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('arcade:lang', () => {
+      last.levelName = null; last.objective = null; last.hint = null; last.hintKind = null;
+      last.matList = '';
+      paintZoneButton();
+    });
+  }
 }
 
 function bind(node, fn) {
@@ -110,12 +124,18 @@ function makeZoneButton() {
   b.id = 'btn-framezone';
   b.className = 'tool-btn';
   b.type = 'button';
-  b.title = 'Frame the build zone — zoom in so the grid is bigger than your finger';
-  if (typeof b.setAttribute === 'function') b.setAttribute('aria-label', 'Frame the build zone');
   b.textContent = '⛶';
   b.addEventListener('click', frameZone);
   group.appendChild(b);
   D['btn-framezone'] = b;
+  paintZoneButton();
+}
+
+function paintZoneButton() {
+  const b = D['btn-framezone'];
+  if (!b) return;
+  b.title = t('tool.zoneTitle');
+  if (typeof b.setAttribute === 'function') b.setAttribute('aria-label', t('tool.zone'));
 }
 
 // camera.fitZone(x0, y0, x1, y1) frames a world rect. The y range is the LOWEST
@@ -238,7 +258,7 @@ export function update(S) {
 
   const build = S.phase === 'build';
 
-  set('hud-level-name', S.level.name || '', 'levelName');
+  set('hud-level-name', levelName(S.level), 'levelName');
   set('hud-objective', modes.objectiveText(S.level), 'objective');
 
   // designCost() walks every member and builds a node index, so it is called
@@ -339,8 +359,9 @@ function updateMaterials(S, left) {
       btn.className = 'tool-btn mat-btn';
       btn.type = 'button';
       btn.dataset.mat = id;
-      btn.title = mat.name + ' — ' + (mat.blurb || '')
-        + (rated ? ' Holds roughly ' + headM(head) + ' m of water head.' : '')
+      const matName = tOr('mat.' + id + '.name', mat.name);
+      btn.title = matName + ' — ' + tOr('mat.' + id + '.blurb', mat.blurb || '')
+        + (rated ? t('mat.headTitle', headM(head)) : '')
         + ' (' + (i + 1) + ')';
 
       const sw = document.createElement('i');
@@ -349,7 +370,7 @@ function updateMaterials(S, left) {
 
       const name = document.createElement('span');
       name.className = 'mat-name';
-      name.textContent = mat.name;
+      name.textContent = matName;
 
       const cost = document.createElement('span');
       cost.className = 'mat-cost';
@@ -370,7 +391,7 @@ function updateMaterials(S, left) {
       if (rated) {
         const rating = document.createElement('span');
         rating.className = 'mat-head';
-        rating.textContent = '~' + headM(head) + ' m head';
+        rating.textContent = t('mat.head', headM(head));
         btn.append(sw, name, cost, rating, hot);
       } else {
         btn.append(sw, name, cost, hot);
@@ -453,16 +474,16 @@ function updateHint(S) {
   const reason = getHint();          // '' once the refusal has gone stale
   const armed = (getBuilder() || {}).chainHead;
   if (reason) {
-    text = reason.toUpperCase();
+    text = tOr('reason.' + reason, reason).toUpperCase();
     kind = 'warn';
   } else if (armed) {
-    text = 'Tap anywhere in the lit circle to build this beam';
+    text = t('hud.armed');
     kind = 'info';
   } else {
     const hints = S.level.hints || [];
     const built = S.design ? S.design.members.length : 0;
-    if (hints.length && built === 0) { text = hints[0]; kind = 'info'; }
-    else if (hints.length > 1 && built < 3) { text = hints[1]; kind = 'info'; }
+    if (hints.length && built === 0) { text = levelHint(S.level, 0); kind = 'info'; }
+    else if (hints.length > 1 && built < 3) { text = levelHint(S.level, 1); kind = 'info'; }
   }
 
   if (last.hint === text && last.hintKind === kind) return;

@@ -80,6 +80,12 @@ OPUS C — Rendering, UX & Content:
                                by index.html as its own module script, imports
                                nothing and exports nothing, and is NOT named
                                fullscreen.js for the reason in its header)
+  src/i18n.js                 (every word a player reads, bokmål + English;
+                               nb is the default, the choice is the hub-wide
+                               key arcade.lang.v1. Level/material English
+                               stays in their data files; modes.js writes
+                               causes as {key, args} and keeps `cause` as the
+                               English line tests match on)
   src/levels/levels.js  src/levels/levelLoader.js
 ```
 

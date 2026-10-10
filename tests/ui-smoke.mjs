@@ -118,6 +118,13 @@ globalThis.document = {
 };
 
 const store = new Map();
+// The game speaks Norwegian unless told otherwise (src/i18n.js), and these
+// suites assert on English words — "dams standing", "m of water head", the
+// coaching lines. Pin the hub-wide language key BEFORE anything imports
+// i18n.js, exactly as a player who once chose English would have it. The
+// English lines are the contract the suites were written against; the bokmål
+// table is checked for completeness separately.
+store.set('arcade.lang.v1', 'en');
 globalThis.localStorage = {
   getItem: (k) => (store.has(k) ? store.get(k) : null),
   setItem: (k, v) => store.set(k, String(v)),

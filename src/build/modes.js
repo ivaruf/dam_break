@@ -14,6 +14,7 @@ import { getScene } from '../core/game.js';
 import * as waterSim from '../physics/water.js';
 import { designCost } from './builder.js';
 import { MATERIALS } from './materials.js';
+import { t as say, tFor } from '../i18n.js';
 
 const M = {
   level: null, terrain: null,
@@ -85,7 +86,7 @@ export function startSim(level, _prevStats) {
   M.memberCount = S.design ? S.design.members.length : 0;
   M.stats = {
     retained: 1, peakDepth: 0, maxLoad: 0, brokenCount: 0,
-    cost: designCost(S.design), survivalTime: 0, win: false, cause: '',
+    cost: designCost(S.design), survivalTime: 0, win: false, cause: '', causeMsg: null,
   };
 }
 
@@ -225,20 +226,32 @@ function win(st) {
   M.done = true;
   st.win = true;
   st.cause = '';
+  st.causeMsg = null;
   emit('level:win', { stats: st });
 }
 
-function fail(st, cause) {
+// `msg` is {key, args, coach} from one of the cause builders below. The stats
+// carry it twice: `cause` is the line rendered in ENGLISH, an identifier that
+// tests/ and the level checks match on (OVERTOP, BREACH, RETAINED…) and that
+// must not change with the player's language; `causeMsg` is the key and its
+// arguments, which screens.js renders in whatever language is current — and
+// re-renders if the player switches with the result card up.
+function fail(st, msg) {
   if (M.done) return;
   M.done = true;
   st.win = false;
-  st.cause = cause;
-  emit('level:fail', { stats: st, cause });
+  st.cause = tFor('en', msg.key, ...msg.args);
+  st.causeMsg = msg;
+  emit('level:fail', { stats: st, cause: st.cause });
 }
 
 // ---- cause lines ----------------------------------------------------------
+//
+// Each returns a message, never a sentence: the words live in src/i18n.js under
+// cause.* (the line) and coach.* (the advice under it on the result card).
 
 const pct = (v) => Math.round(v * 100);
+const msg = (name, args, coach) => ({ key: 'cause.' + name, args: args || [], coach: 'coach.' + (coach || name) });
 
 // Whichever thing actually happened first tells the story.
 function failureCause(st) {
@@ -248,8 +261,8 @@ function failureCause(st) {
   const tOver = M.overtopT >= 0 ? M.overtopT : Infinity;
   const tBreach = M.breachT >= 0 ? M.breachT : Infinity;
 
-  if (tOver < tBreak && tOver < tBreach) return 'OVERTOPPED — THE RESERVOIR ROSE OVER THE CREST';
-  if (tBreach < tBreak) return 'BREACHED — WATER FOUND A WAY THROUGH';
+  if (tOver < tBreak && tOver < tBreach) return msg('overtop');
+  if (tBreach < tBreak) return msg('breach');
   if (ff) {
     // Two of the four failure modes are not events but processes, and they get
     // their own stories: attrition (it held, and holding is what killed it) and
@@ -259,13 +272,14 @@ function failureCause(st) {
     const brk = M.brk && M.brk.id === ff.memberId ? M.brk : null;
     if (ff.sustained || (brk && brk.sustained)) return sustainedCause(st, ff, brk);
     if (ff.mode === 'bending') return bendingCause(S, st, ff);
-    const mode = ff.mode === 'tension' ? 'TENSION' : 'COMPRESSION';
-    return `${memberLabel(S, ff)} — ${mode} LIMIT EXCEEDED at ${ff.time.toFixed(1)}s`;
+    const mode = ff.mode === 'tension' ? 'tension' : 'compression';
+    const where = memberWhere(S, ff);
+    return msg('limit', [where.where, where.mat, mode, ff.time], mode);
   }
-  if (tOver < Infinity) return 'OVERTOPPED — THE RESERVOIR ROSE OVER THE CREST';
-  if (tBreach < Infinity) return 'BREACHED — WATER FOUND A WAY THROUGH';
-  if (!M.memberCount) return 'NOTHING WAS BUILT — THE WATER JUST WALKED THROUGH';
-  return "BUDGET WASN'T THE PROBLEM — THE DAM SLID";
+  if (tOver < Infinity) return msg('overtop');
+  if (tBreach < Infinity) return msg('breach');
+  if (!M.memberCount) return msg('nothing');
+  return msg('slid');
 }
 
 // `early` = the reservoir drained mid-run (something gave way); otherwise the
@@ -275,8 +289,8 @@ function retainCause(st, min, early) {
   const hasEvent = (S.structure && S.structure.firstFailure) || M.overtopT >= 0 ||
     M.breachT >= 0 || !M.memberCount;
   if (hasEvent) return failureCause(st);
-  if (early) return "BUDGET WASN'T THE PROBLEM — THE DAM SLID";
-  return `ONLY ${pct(st.retained)}% RETAINED — ${pct(min)}% WAS NEEDED`;
+  if (early) return msg('slid');
+  return msg('retained', [pct(st.retained), pct(min)]);
 }
 
 // CREEP. The peak is not the point — the point is that the dam sat just under
@@ -286,7 +300,7 @@ function sustainedCause(st, ff, brk) {
   const load = brk && brk.load > 0 ? brk.load : (st.maxLoad || 0);
   const held = brk && brk.heldFor > 0 ? brk.heldFor
     : (M.overSince >= 0 ? Math.max(0, ff.time - M.overSince) : ff.time);
-  return `GAVE WAY UNDER SUSTAINED LOAD — HELD AT ${pct(load)}% FOR ${Math.round(held)} s`;
+  return msg('sustained', [pct(load), Math.round(held)]);
 }
 
 // BENDING. Where it went (midspan) and what was leaning on it (deep water over a
@@ -294,12 +308,8 @@ function sustainedCause(st, ff, brk) {
 // a pier under it, or spend on something stiffer.
 function bendingCause(S, st, ff) {
   const span = memberSpan(S, ff.memberId);
-  const mat = span.matId && MATERIALS[span.matId] ? MATERIALS[span.matId].name.toUpperCase() : '';
-  const what = span.len > 0
-    ? `${span.len.toFixed(1)} m SPAN${mat ? ' OF ' + mat : ''}`
-    : (mat ? `A ${mat} SPAN` : 'AN UNSUPPORTED SPAN');
-  const depth = st.peakDepth > 0.1 ? `${st.peakDepth.toFixed(1)} m OF WATER` : 'DEEP WATER';
-  return `SNAPPED AT MIDSPAN — ${what} UNDER ${depth} at ${ff.time.toFixed(1)}s`;
+  const mat = span.matId && MATERIALS[span.matId] ? span.matId : '';
+  return msg('bending', [span.len, mat, st.peakDepth, ff.time]);
 }
 
 // Span + material of the member that failed. restLength is the true span, so the
@@ -324,25 +334,27 @@ function memberSpan(S, memberId) {
 }
 
 function collapseCause(st) {
-  return `PROGRESSIVE COLLAPSE — ${st.brokenCount} OF ${M.memberCount} MEMBERS FAILED`;
+  return msg('collapse', [st.brokenCount, M.memberCount]);
 }
 
 function protectCause() {
-  return `FLOODED DOWNSTREAM — ${M.zoneDepth.toFixed(2)} m IN THE PROTECTED ZONE`;
+  return msg('flooded', [M.zoneDepth]);
 }
 
-// 'LOWER LEFT TIMBER' etc, from where the break happened inside the design.
-function memberLabel(S, ff) {
+// Where the break happened inside the design, as ids i18n.js turns into
+// 'LOWER LEFT TIMBER' / 'TRE NEDE TIL VENSTRE'. `where` is null when there is
+// no design box to place it in, and the line then names only the material.
+function memberWhere(S, ff) {
   const design = S.design;
   const m = design ? design.members.find((x) => x.id === ff.memberId) : null;
-  const matName = m && MATERIALS[m.mat] ? MATERIALS[m.mat].name.toUpperCase() : 'MEMBER';
+  const mat = m && MATERIALS[m.mat] ? m.mat : '';
   const box = designBBox(design);
-  if (!box) return matName;
+  if (!box) return { where: null, mat };
   const fx = box.w > 1e-6 ? (ff.x - box.x0) / box.w : 0.5;
   const fy = box.h > 1e-6 ? (ff.y - box.y0) / box.h : 0.5;
-  const vert = fy < 1 / 3 ? 'LOWER' : fy > 2 / 3 ? 'UPPER' : 'MID';
-  const horiz = fx < 1 / 3 ? 'LEFT' : fx > 2 / 3 ? 'RIGHT' : 'CENTRE';
-  return `${vert} ${horiz} ${matName}`;
+  const vert = fy < 1 / 3 ? 'lower' : fy > 2 / 3 ? 'upper' : 'mid';
+  const horiz = fx < 1 / 3 ? 'left' : fx > 2 / 3 ? 'right' : 'centre';
+  return { where: { vert, horiz }, mat };
 }
 
 function designBBox(design) {
@@ -363,9 +375,9 @@ export function objectiveText(level) {
   const o = (level || M.level || {}).objective;
   if (!o) return '';
   const d = o.duration || cfg().defaultDuration;
-  if (o.type === 'retain') return `HOLD ${pct(o.minRetention || 0)}% FOR ${d}s`;
-  if (o.type === 'protect') return `KEEP DOWNSTREAM UNDER ${o.maxDepth} m FOR ${d}s`;
-  return `SURVIVE ${d}s`;
+  if (o.type === 'retain') return say('obj.retain', pct(o.minRetention || 0), d);
+  if (o.type === 'protect') return say('obj.protect', o.maxDepth, d);
+  return say('obj.survive', d);
 }
 
 // Live objective progress for the HUD: 0..1 plus the raw numbers.

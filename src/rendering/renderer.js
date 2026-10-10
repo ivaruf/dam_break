@@ -20,6 +20,7 @@ import { CONFIG } from '../config.js';
 import { getBuilder, budgetLeft, snapOptsFor } from '../build/builder.js';
 import { classifyReachGeom, REACH_BAD } from '../build/snapping.js';
 import { MATERIALS } from '../build/materials.js';
+import { t as say, tOr } from '../i18n.js';   // canvas labels: t() every frame, so a language switch lands on the next one
 
 const R = CONFIG.render;
 const RE = CONFIG.reach;
@@ -643,7 +644,7 @@ function drawProtectZone(ctx, level) {
   ctx.stroke();
   ctx.restore();
 
-  labelAt(ctx, 'PROTECT', (a + b) * 0.5, zoneLabelY(), R.protectLine, true);
+  labelAt(ctx, say('canvas.protect'), (a + b) * 0.5, zoneLabelY(), R.protectLine, true);
 }
 
 function drawBuildZone(ctx, level) {
@@ -663,7 +664,7 @@ function drawBuildZone(ctx, level) {
   ctx.stroke();
   ctx.restore();
   const mid = (Math.max(a, 0) + Math.min(b, W)) * 0.5;
-  labelAt(ctx, 'BUILD ZONE', mid, zoneLabelY(), R.buildZoneLine, true);
+  labelAt(ctx, say('canvas.zone'), mid, zoneLabelY(), R.buildZoneLine, true);
 }
 
 // ---- anchors ------------------------------------------------------------
@@ -1609,7 +1610,7 @@ function drawLiftedNode(ctx) {
   ctx.restore();
 
   if (!nd.ok && nd.reason) {
-    labelAt(ctx, String(nd.reason).toUpperCase(), px, py - 20 * dpr, R.ghostBad, true);
+    labelAt(ctx, tOr('reason.' + nd.reason, String(nd.reason)).toUpperCase(), px, py - 20 * dpr, R.ghostBad, true);
   }
 }
 
@@ -1664,7 +1665,7 @@ function drawMarquee(ctx) {
   // is the difference between a confident drag and an undo.
   const n = (B.marqueeHits && B.marqueeHits.length) || 0;
   if (n > 0) {
-    labelAt(ctx, n === 1 ? 'DELETE 1 BEAM' : 'DELETE ' + n + ' BEAMS',
+    labelAt(ctx, say('canvas.delete', n),
       x + w * 0.5, Math.max(R.labelFontPx * dpr + 4 * dpr, y - 6 * dpr), R.marqueeLine, true);
   }
 }

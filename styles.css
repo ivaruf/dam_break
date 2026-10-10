@@ -378,7 +378,19 @@ textarea,
    fill the space between header and BACK — pull the header text and the
    BACK button back to a natural centred width instead of stretching them */
 #screen-levels > .screen-head { align-self: center; }
-#btn-levels-back { align-self: center; }
+/* The foot (language row, BACK, the way out) is one centred column here and
+   one wrapping row on a short landscape viewport, further down. */
+.levels-foot {
+  align-self: center;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 420px);
+}
+.levels-foot > .lang-row { width: 100%; }
+.lang-row-levels { display: flex; align-items: center; column-gap: 12px; }
 #levels-progress { margin-bottom: 2px; }
 
 #level-grid {
@@ -616,11 +628,13 @@ textarea,
 /* ONE gutter for both rows, so MUSIC and EFFECTS put their sliders at the same
    x — the hub's .row/.label/.slider shape, under this game's own names.
    `.label` on its own is too generic to introduce into a stylesheet that
-   already carries .hud-label, .mat-name and .level-name. 74px because EFFECTS,
-   the longer of the two, measures ~62px at this size and tracking. */
+   already carries .hud-label, .mat-name and .level-name. 84px because the
+   longest label in either language — EFFEKTER, and LANGUAGE on the language
+   row that shares this gutter — measures ~74px at this size and tracking. */
 .vol-row { display: flex; align-items: center; gap: 12px; }
 .vol-label {
-  flex: 0 0 74px;
+  flex: 0 0 84px;
+  text-align: left;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.14em;
@@ -708,6 +722,51 @@ textarea,
   text-align: left;
 }
 #btn-sound-back { display: block; width: 100%; }
+
+/* ---- THE LANGUAGE ROW ----
+   Two equal plates in one segmented row, Norsk first, each a flag and its
+   endonym. The same plate as a .tool-btn — surface, rim, and the accent rim
+   for the one that is lit, read off aria-pressed — so it belongs to the same
+   blueprint as the toolbar rather than being a stock toggle.
+
+   flex: 1 1 0 on the plates, never auto: "Norsk" is shorter than "English",
+   and auto would draw the default as the smaller, lesser choice. The row may
+   WRAP: on a phone under ~370px the pair cannot sit beside the 84px label, and
+   rather than shrink the plates below a thumb it drops them onto a line of
+   their own, still full width and still equal. */
+.lang-row { flex-wrap: wrap; row-gap: 6px; }
+.lang-seg { flex: 1 1 200px; min-width: 0; display: flex; gap: 8px; }
+.lang-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.lang-btn[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--surface-3);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft), 0 0 12px var(--accent-soft);
+}
+.lang-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lang-btn .flag { flex: 0 0 auto; height: 15px; border-radius: 2px; box-shadow: 0 0 0 1px var(--scrim); }
+.lang-btn[data-lang="nb"] .flag { width: 21px; }   /* 22:16 */
+.lang-btn[data-lang="en"] .flag { width: 30px; }   /* 2:1 */
 
 /* ==================== HUD — TOP BAR & METERS ==================== */
 #hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
@@ -1166,6 +1225,11 @@ textarea,
      sacrificed — so the height comes back out of the gaps around them. */
   .vol-rows { margin: 10px 0 12px; padding-top: 10px; gap: 4px; }
   .sound-note { margin-bottom: 12px; }
+  /* The level screen's foot becomes one wrapping row: language, BACK and the
+     way out side by side, so the grid keeps two rows of height it would
+     otherwise spend on three stacked 44px controls. */
+  .levels-foot { flex-direction: row; flex-wrap: wrap; justify-content: center; width: min(100%, 900px); gap: 8px; }
+  .levels-foot > .lang-row { width: auto; flex: 0 1 360px; }
 }
 
 /* ---- RESULT CARD ON A SHORT, WIDE VIEWPORT (landscape phone) ----
@@ -1214,8 +1278,9 @@ textarea,
   #tool-group { gap: 4px; }
   .tool-sep { margin-inline: 0; }
   /* The label gutter gives up twelve pixels here so the fader itself stays
-     long enough to aim at. Both labels still fit on one line at 62px. */
-  .vol-label { flex-basis: 62px; letter-spacing: 0.1em; }
+     long enough to aim at. EFFEKTER and LANGUAGE, the longest in either
+     language, still fit on one line at 72px. */
+  .vol-label { flex-basis: 72px; letter-spacing: 0.1em; }
   .vol-row { gap: 8px; }
 }
 
@@ -1226,6 +1291,8 @@ textarea,
 }
 
 @media (hover: hover) {
+  .lang-btn:hover { border-color: var(--accent); color: var(--text); }
+  .lang-btn[aria-pressed="true"]:hover { color: var(--accent); }
   .big-btn:hover, .small-btn:hover, .tool-btn:hover, .speed-btn:hover, .mat-btn:hover {
     background: var(--surface-3);
     border-color: var(--accent);

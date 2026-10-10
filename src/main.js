@@ -2,6 +2,7 @@
 
 import * as game from './core/game.js';
 import { emit } from './core/events.js';
+import { t } from './i18n.js';
 
 const canvas = document.getElementById('game');
 
@@ -42,6 +43,16 @@ function swVersion(worker) {
 }
 
 let swReg = null;
+let waitingVersion = undefined;   // undefined: nothing offered yet
+
+// The button's words in the current language, with the waiting build's tag.
+// Called again on every language switch, so an offer already on screen follows.
+function paintUpdate() {
+  const btn = document.getElementById('btn-update');
+  if (!btn || waitingVersion === undefined) return;
+  btn.textContent = t('update.ready') + (waitingVersion ? ' — ' + waitingVersion : '');
+}
+document.addEventListener('arcade:lang', paintUpdate);
 
 function offerIfWaiting() {
   if (!swReg || !swReg.waiting || !navigator.serviceWorker.controller) return;
@@ -49,7 +60,8 @@ function offerIfWaiting() {
     const btn = document.getElementById('btn-update');
     if (!btn) return;
     btn.classList.remove('hidden');
-    btn.textContent = `⬆ UPDATE READY${v ? ' — ' + v : ''}`;
+    waitingVersion = v || null;
+    paintUpdate();
     btn.onclick = () => swReg.waiting && swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
   });
 }
