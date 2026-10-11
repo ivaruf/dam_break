@@ -82,10 +82,11 @@ function wireEvents() {
   on('ui:release', () => release());
   on('ui:retry', () => retry());
   on('ui:edit', () => toEdit());
-  // The HUD's menu plate opens the pause menu over the run; it used to drop
-  // straight to the level list, which threw the run away in one tap. Leaving
-  // the level is now a button inside that menu (ui:levels).
-  on('ui:menu', () => screens.openPause());
+  // The corner's three-bar plate: the in-play menu (and a pause) over a run,
+  // the same panel's Settings face anywhere else (screens.openMenu()). It used
+  // to drop straight to the level list, which threw the run away in one tap;
+  // leaving the level is now a button inside that menu (ui:levels).
+  on('ui:menu', () => screens.openMenu());
   on('ui:levels', () => setPhase('levelselect'));
   on('ui:speed', ({ v }) => setSpeed(v));
 

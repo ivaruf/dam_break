@@ -58,25 +58,19 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   /* THE TOP-RIGHT CORNER, MEASURED ONCE.
-     The sound + fullscreen cluster is fixed to the page and is there on every
-     screen and right through a run (see #corner-tools), so everything else
-     that wants that corner is positioned off ITS box rather than off a number
-     somebody guessed. Reading in from the corner: fullscreen, sound — and then
-     ☰ LEVELS, one row below and flush with the same edge, because it belongs
-     to a level and only exists while one is loaded. */
+     The hub's three plates — menu, sound, fullscreen — are fixed to the page
+     and are there on every screen and right through a run (see #corner-tools),
+     so everything else that wants that corner is positioned off ITS box rather
+     than off a number somebody guessed. */
   --corner-inset: 12px;   /* the cluster's own distance from the top and right edges */
-  --corner-w: 104px;      /* 5 strip padding + 44 plate + 6 gap + 44 plate + 5 */
+  --corner-w: 154px;      /* 5 strip padding + 3 × 44 plate + 2 × 6 gap + 5 */
   --corner-h: 54px;       /* 5 + 44 + 5 */
 
   /* The width of that whole column, which #hud-top keeps clear on its right so
-     the budget block can never end up under the cluster, and inside which ☰
-     sits one row down. It stays ONE token shared by the HUD and the button so
-     the two cannot drift apart into an overlap — the readouts running under the
-     menu button was a real regression once. */
+     the budget block can never end up under the cluster. ONE token, so the HUD
+     and the cluster cannot drift apart into an overlap — the readouts running
+     under the menu button was a real regression once. */
   --hud-menu-gap: calc(var(--corner-inset) + var(--corner-w) + 8px);
-  /* Straight under the cluster with 2px of air. Derived, so shrinking the
-     plates on a short viewport pulls this up by exactly as much. */
-  --hud-menu-top: calc(var(--corner-inset) + var(--corner-h) + 2px);
 }
 
 /* ==================== RESET / BASE ==================== */
@@ -169,6 +163,10 @@ textarea,
    right thing (a beam between two nodes; a dashed box with an ×). currentColor
    throughout, so they inherit every state colour below for free. */
 .tool-btn > svg { width: 22px; height: 22px; display: block; pointer-events: none; }
+/* The hub's CSS trap: [hidden] is only a presentation hint and loses to the
+   inline-flex above, so the fullscreen plate would show on exactly the iPhone
+   it is hidden from. Written out, every time. */
+.tool-btn[hidden] { display: none; }
 .tool-btn.active { border-color: var(--accent); background: var(--surface-3); color: var(--accent); }
 .tool-btn.danger.active { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
 .speed-btn {
@@ -352,7 +350,8 @@ textarea,
    not cost the picture anything. */
 #screen-title .logo h1 { text-shadow: 0 2px 4px rgba(4, 10, 16, 0.95), 0 6px 34px rgba(4, 10, 16, 0.8); }
 #screen-title .tagline,
-#screen-title .hint { text-shadow: 0 1px 3px rgba(4, 10, 16, 0.98), 0 2px 16px rgba(4, 10, 16, 0.9); }
+#screen-title .hint,
+#screen-title .vol-label { text-shadow: 0 1px 3px rgba(4, 10, 16, 0.98), 0 2px 16px rgba(4, 10, 16, 0.9); }
 #screen-title .tagline { color: var(--text); }
 #screen-title .hint { color: var(--text-dim); }
 
@@ -599,21 +598,20 @@ textarea,
 .result-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 
 /* ==================== THE CORNER CLUSTER ====================
-   Sound and fullscreen, top right, ON EVERY SCREEN AND THROUGH EVERY RUN.
+   The hub's three plates, top right, ON EVERY SCREEN AND THROUGH EVERY RUN:
+   menu, sound (a live mute), fullscreen, reading left to right.
 
-   It borrows the toolbar's own vocabulary rather than inventing one: two
-   .tool-btn plates inside a bordered strip, which is exactly what #tool-group
-   is at the foot of the build screen. This game draws its controls as square
-   plates bolted onto a blueprint; a soft round glass pill would belong to some
-   other game in the arcade, not to this one. 44px targets come with .tool-btn,
-   so a tablet is already served.
+   It borrows the toolbar's own vocabulary rather than inventing one: .tool-btn
+   plates inside a bordered strip, which is exactly what #tool-group is at the
+   foot of the build screen. This game draws its controls as square plates
+   bolted onto a blueprint; a soft round glass pill would belong to some other
+   game in the arcade, not to this one. 44px targets come with .tool-btn, so a
+   tablet is already served.
 
-   FIXED TO THE PAGE, not to whatever the page is currently showing. It used to
-   be taken away for build and sim because ☰ LEVELS wanted the same corner, and
-   the price of that trade was that a player who had started a level could not
-   reach fullscreen or the volume again without abandoning it. The pair belongs
-   to the page; ☰ belongs to the run, so ☰ is the one that moved — one row down,
-   inside the column --hud-menu-gap reserves, flush with this strip's own edge.
+   FIXED TO THE PAGE, not to whatever the page is currently showing. Until
+   2026-10-11 the menu plate lived one row down inside the HUD and the title
+   had no menu at all; now all three are here, always, and the HUD keeps the
+   column under them clear (--hud-menu-gap).
 
    Above .screen (10) and above #hud (5): this outlives both, so nothing either
    of them does may cover it. */
@@ -635,19 +633,30 @@ textarea,
    out, and the same four pulled in — and aria-pressed chooses. src/ui/screen.js
    writes that attribute and the accessible label from one paint(), so what is
    drawn and what is announced cannot drift apart. */
+#corner-tools svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* The speaker carries both of ITS states the same way: the waves while
+   audible, the slash while muted (aria-pressed="true", written by
+   src/ui/screens.js with the label). */
+#btn-sound .icon-slash { display: none; }
+#btn-sound[aria-pressed="true"] .icon-waves { display: none; }
+#btn-sound[aria-pressed="true"] .icon-slash { display: inline; }
+#btn-sound[aria-pressed="true"] { color: var(--text-dim); }
+
 #btn-screen .icon-in { display: none; }
 #btn-screen[aria-pressed="true"] .icon-out { display: none; }
 #btn-screen[aria-pressed="true"] .icon-in { display: inline; }
 #btn-screen[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
-/* ==================== SOUND PANEL ====================
-   Behind a door on purpose: it is set once, and in-play chrome competes with
-   the valley for attention. The surface is the result card's plate, so the
-   panel reads as another page of the same document rather than as an options
-   dialog someone dropped on top of the game. */
-.sound-card { width: min(420px, 92vw); text-align: left; }
-.sound-card .screen-head { text-align: center; margin-bottom: 4px; }
-
+/* ==================== THE MENU'S SOUND ROWS ====================
+   Two faders and the language row in the menu panel (#screen-pause), set
+   once, behind the three bars, because in-play chrome competes with the valley
+   for attention. */
 .vol-rows {
   display: flex;
   flex-direction: column;
@@ -753,17 +762,24 @@ textarea,
   color: var(--text-dim);
   text-align: left;
 }
-#btn-sound-back { display: block; width: 100%; }
 
-/* ==================== THE IN-PLAY MENU ====================
-   The same plate as the sound panel and the result card, so pausing reads as
-   another page of the same document. One .menu-col down the middle: RESUME,
-   LEVELS, the language row, and the way out last. The language row keeps the
-   sound panel's label gutter (it is a .vol-row) so SPRÅK sits where it does
-   there. */
-.pause-card { width: min(400px, 92vw); }
+/* ==================== THE MENU ====================
+   The game's one menu panel, both faces (in play: PAUSE, RESUME, LEVELS;
+   elsewhere: SETTINGS, BACK). The same plate as the result card, so pausing
+   reads as another page of the same document. One column, top to bottom: the
+   doors back in, the faders and the language row on one label gutter, the
+   honest line, and the way out LAST, full width, a little apart. A grid with
+   align-content: start (the hub's iPad lesson) so no row is ever stretched. */
+.pause-card {
+  width: min(420px, 92vw);
+  display: grid;
+  align-content: start;
+  justify-items: stretch;
+  text-align: left;
+}
+.pause-card .screen-head { text-align: center; }
 .pause-card .menu-col { width: 100%; margin-top: 12px; }
-.pause-card .lang-row { padding-top: 10px; border-top: 1px solid var(--border); }
+.pause-card > .quit-btn { margin-top: 2px; }
 
 /* ---- THE LANGUAGE ROW ----
    Two equal plates in one segmented row, Norsk first, each a flag and its
@@ -841,7 +857,8 @@ textarea,
 
 /* nowrap is load-bearing. "LEFT OF $5,470" broke onto THREE lines when the top
    row got tight (a 320px screen with the countdown timer column showing), and
-   the third line landed on top of #btn-hud-menu one row below. */
+   the third line landed on top of the menu button (then one row below the
+   corner; it is in the corner itself now). */
 .hud-label { display: block; font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
 
 /* The squeeze order in this row is explicit. #hud-level is the ONLY column that
@@ -870,12 +887,10 @@ textarea,
    flex-shrunk box overflows its own bounds and prints on top of the neighbour
    (they don't wrap — there is no break opportunity inside "248%"). flex:0 0 auto
    + nowrap keeps each column exactly as wide as its content. */
-/* No gutter of its own any more. #btn-hud-menu is still absolutely positioned
-   OUTSIDE this flow, in its own row at --hud-menu-top — but that row is now
-   inside the corner column that #hud-top as a whole keeps clear (see its
-   padding-right, the same --hud-menu-gap). Nothing in this box can reach
-   either the button or the cluster above it, so padding it a second time would
-   only squeeze two readouts that have to fit a 320px screen. */
+/* No gutter of its own: the corner column is kept clear by #hud-top as a
+   whole (its padding-right, --hud-menu-gap), so nothing in this box can reach
+   the cluster, and padding it a second time would only squeeze two readouts
+   that have to fit a 320px screen. */
 #hud-readouts {
   display: flex;
   gap: 12px;
@@ -1087,25 +1102,6 @@ textarea,
   padding: clamp(10px, 2.8vw, 15px) clamp(14px, 4vw, 26px);
 }
 
-/* ☰ MENU (it opened the level list until 2026-10-11, and opens the pause menu
-   now): one row under the fixed corner cluster and flush with its right
-   edge, so the two read as one column of controls rather than two things
-   fighting for one corner. It belongs to a RUN — it exists only while #hud
-   does — which is why it is the one that gave way; the pair above it belongs
-   to the page and is always there. Both offsets derive from the corner tokens
-   (see the tokens block), so shrinking the plates moves this up with them. */
-#btn-hud-menu > svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.9;
-  stroke-linecap: round;
-}
-#btn-hud-menu {
-  position: absolute;
-  right: calc(var(--corner-inset) + env(safe-area-inset-right, 0px));
-  top: calc(env(safe-area-inset-top, 0px) + var(--hud-menu-top));
-}
-
 /* build hint: a correction ("over budget") or a calm level hint. A row in the
    bottom stack ABOVE the toolbar, so it can never sit on the release button (it
    used to, at bottom:70px) and its appearing never nudges the controls. */
@@ -1212,17 +1208,15 @@ textarea,
    shorter top bar. Touch targets stay at 44px — that minimum is never the thing
    that gets sacrificed. */
 @media (max-height: 520px) {
-  /* The corner cluster tightens with everything else, and the two numbers that
-     hang off it follow on their own: ☰ lands at 58px instead of the 54 this
-     block used to pin by hand, and the column the HUD reserves narrows to
-     112px. THE PLATES THEMSELVES DO NOT SHRINK. Every other game in the hub
-     takes its corner down to 38px sideways; here the 44px target is the one
-     thing this block has never been allowed to spend (tests/ui-layout.mjs
-     enforces it), so the strip gives up its padding and its distance from the
-     edge instead, and ☰ pays the four pixels. */
+  /* The corner cluster tightens with everything else, and the column the HUD
+     reserves narrows with it on its own. THE PLATES THEMSELVES DO NOT SHRINK.
+     Every other game in the hub takes its corner down to 38px sideways; here
+     the 44px target is the one thing this block has never been allowed to
+     spend (tests/ui-layout.mjs enforces it), so the strip gives up its padding
+     and its distance from the edge instead. */
   :root {
     --corner-inset: 6px;
-    --corner-w: 98px;    /* 3 + 44 + 4 gap + 44 + 3 */
+    --corner-w: 146px;   /* 3 + 3 × 44 + 2 × 4 gap + 3 */
     --corner-h: 50px;    /* 3 + 44 + 3 */
   }
   #corner-tools { padding: 3px; gap: 4px; }
@@ -1274,6 +1268,15 @@ textarea,
      sacrificed — so the height comes back out of the gaps around them. */
   .vol-rows { margin: 10px 0 12px; padding-top: 10px; gap: 4px; }
   .sound-note { margin-bottom: 12px; }
+
+  /* THE TITLE'S COLUMN, SIDEWAYS. The language row joined it on 2026-10-11
+     (hub §2: on the start screen itself, as a visible row, above the way
+     out), and that one 44px row ran the column ten pixels off a 390px-tall
+     phone. The pixels come back out of the air between the doors and PLAY's
+     own padding — never out of a 44px target. */
+  #screen-title .title-actions { gap: 7px; }
+  #screen-title .big-btn { padding-block: 10px; }
+  .menu-col > .quit-btn { margin-top: 4px; }
 }
 
 /* ---- RESULT CARD ON A SHORT, WIDE VIEWPORT (landscape phone) ----
@@ -1286,31 +1289,42 @@ textarea,
 @media (max-height: 560px) and (min-width: 560px) {
   .end-card { width: min(700px, 94vw); max-width: 94vw; }
   .end-stats { grid-template-columns: 1fr auto 1fr auto; }
+  /* A card this wide and this tall reaches up under the corner's three plates
+     on a 390px-tall phone (the win card's top edge landed at 48px, the strip
+     ends at 58). So the two card screens keep the corner's column clear on
+     the right, exactly as #hud-top does, and the card centres in what is
+     left. The title is left centred: its column is narrow and never gets
+     there. */
+  #screen-result, #screen-pause {
+    padding-right: calc(var(--hud-menu-gap) + env(safe-area-inset-right, 0px));
+  }
+  #screen-result .end-card, #screen-pause .end-card { max-width: 100%; }
   .result-btns { gap: 8px; }
 
-  /* ---- AND THE SOUND PANEL, SIDEWAYS ----
+  /* ---- AND THE MENU, SIDEWAYS ----
      Same trick, same reason, and the shape maxgear arrived at: a phone on its
      side has width exactly where it has no height, so the card becomes a
      two-column grid laid over the existing markup BY GRID AREA. Nothing moves
      in index.html, portrait is untouched, and a tablet — taller than 560px
-     whichever way up — keeps the stack. The reading matter goes down the left,
-     the two faders and the way out down the right, and a 390px-tall phone
-     never has to scroll a menu to find the way back. */
-  .sound-card {
-    width: min(620px, 94vw);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+     whichever way up — keeps the stack. The heading, the doors back in and the
+     honest line go down the left; the faders, the language and the way out
+     down the right, so the way out is still last — bottom right — and a
+     390px-tall phone never has to scroll a menu to find it. */
+  .pause-card {
+    width: min(680px, 94vw);
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
     grid-template-areas:
       "head rows"
-      "note rows"
-      "note back";
+      "acts rows"
+      "note quit";
     column-gap: 22px;
-    align-content: center;
+    align-items: start;
   }
-  .sound-card .screen-head { grid-area: head; text-align: left; margin-bottom: 8px; }
-  .sound-card .vol-rows { grid-area: rows; margin: 0; padding-top: 0; border-top: 0; align-self: center; }
-  .sound-note { grid-area: note; margin: 0; }
-  #btn-sound-back { grid-area: back; align-self: end; }
+  .pause-card .screen-head { grid-area: head; text-align: left; margin: 0 0 6px; }
+  .pause-card .menu-col { grid-area: acts; margin-top: 0; }
+  .pause-card .vol-rows { grid-area: rows; margin: 0; padding-top: 0; border-top: 0; }
+  .pause-card .sound-note { grid-area: note; margin: 10px 0 0; align-self: end; }
+  .pause-card > .quit-btn { grid-area: quit; margin-top: 8px; align-self: end; }
 }
 
 /* ---- VERY NARROW (≤ 379px) ----

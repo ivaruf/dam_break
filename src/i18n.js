@@ -186,17 +186,16 @@ const STRINGS = {
     'badge.countdown': 'NEDTELLING',
     'badge.freebuild': 'FRITT BYGG',
 
-    // ---- sound panel ----
-    'sound.title': 'LYD',
-    'sound.tagline': 'Ingenting å høre ennå.',
+    // ---- the menu panel's sound rows ----
     'sound.music': 'MUSIKK',
     'sound.sfx': 'EFFEKTER',
-    'sound.note': '⚠ DAM BREAK er helt stille — ingen musikk, ingen lyder, ingenting disse to glidebryterne kan skru på i dag. De blir likevel lagret på denne enheten, så når vannet en dag får en stemme, kommer den på nivået du valgte og ikke på full guffe.',
+    'sound.note': '⚠ DAM BREAK er helt stille ennå. Nivåene lagres likevel, så når vannet får en stemme, kommer den på nivået du valgte.',
 
     // ---- corner + HUD chrome ----
-    'corner.sound': 'Lyd',
+    'corner.mute': 'Slå av lyden',
+    'corner.unmute': 'Slå på lyden',
     'hud.menu': 'Meny',
-    'hud.menuTitle': 'Meny (Esc)',
+    'menu.settings': 'INNSTILLINGER',
     'pause.title': 'PAUSE',
     'pause.resume': '▶ FORTSETT',
     'hud.floodArrives': 'FLOMMEN KOMMER',
@@ -426,15 +425,14 @@ const STRINGS = {
     'badge.countdown': 'COUNTDOWN',
     'badge.freebuild': 'FREE BUILD',
 
-    'sound.title': 'SOUND',
-    'sound.tagline': 'Nothing to hear yet.',
     'sound.music': 'MUSIC',
     'sound.sfx': 'EFFECTS',
-    'sound.note': '⚠ DAM BREAK ships silent — no music, no cues, nothing these two sliders can move today. They are saved to this device anyway, so when the water finally gets a voice it arrives at the level you chose rather than at full blast.',
+    'sound.note': '⚠ DAM BREAK is silent for now. The levels are saved anyway, so when the water gets a voice it arrives at the level you chose.',
 
-    'corner.sound': 'Sound',
+    'corner.mute': 'Mute',
+    'corner.unmute': 'Unmute',
     'hud.menu': 'Menu',
-    'hud.menuTitle': 'Menu (Esc)',
+    'menu.settings': 'SETTINGS',
     'pause.title': 'PAUSED',
     'pause.resume': '▶ RESUME',
     'hud.floodArrives': 'FLOOD ARRIVES',

@@ -1,4 +1,4 @@
-// OPUS C owns. The two volume levels — and NOTHING else.
+// OPUS C owns. The two volume levels and the mute — and NOTHING else.
 //
 // DAM BREAK has no audio. Not a muted engine, not a stub synth: there is no
 // AudioContext anywhere in this repo and nothing that could make a sound. So
@@ -8,7 +8,7 @@
 // volume the player sets has to survive the day the audio actually lands.
 // Storing it is cheap; asking a player to find the panel again after their
 // first flood arrives at full blast is not. The panel says so out loud (see
-// #screen-sound in index.html) — two sliders that quietly do nothing would be
+// the menu panel, #screen-pause in index.html) — two sliders that quietly do nothing would be
 // a lie, two sliders that admit they are a reservation are not.
 //
 // THIS IS THE ONE PLACE A FUTURE AUDIO SYSTEM PLUGS IN. It needs exactly two
@@ -30,6 +30,9 @@
 
 const KEY_MUSIC = 'dam_break.vol.music.v1';
 const KEY_SFX = 'dam_break.vol.sfx.v1';
+// The corner speaker's state since 2026-10-11, when it stopped opening a panel
+// and became the hub's live mute. '1' muted, anything else audible.
+const KEY_MUTE = 'dam_break.mute.v1';
 
 // Neither default is 1.0 on purpose. Music sits under everything and wants
 // headroom; the cues — a beam cracking, water hitting stone — are the half of
@@ -42,6 +45,9 @@ const DEFAULT_SFX = 0.8;
 // store.
 let musicVol = load(KEY_MUSIC, DEFAULT_MUSIC);
 let sfxVol = load(KEY_SFX, DEFAULT_SFX);
+let isMuted = (() => {
+  try { return localStorage.getItem(KEY_MUTE) === '1'; } catch { return false; }
+})();
 
 const listeners = new Set();
 
@@ -70,7 +76,7 @@ function announce() {
   // Copied before iterating: a listener is allowed to unsubscribe itself, and
   // a mixer tearing itself down mid-notification is exactly when it would.
   for (const fn of [...listeners]) {
-    try { fn(musicVol, sfxVol); } catch { /* a broken listener is not a broken game */ }
+    try { fn(musicVol, sfxVol, isMuted); } catch { /* a broken listener is not a broken game */ }
   }
 }
 
@@ -93,7 +99,21 @@ export function setSfx(v) {
   announce();
 }
 
-/** Subscribe to both volumes. Returns the unsubscribe function. */
+export function muted() { return isMuted; }
+
+/** Mute or unmute. A future mixer multiplies by (muted ? 0 : level); the
+ *  levels themselves are untouched, so unmuting lands back where they were.
+ *  Dragging either fader lifts the mute (screens.js) — a slider silently
+ *  cancelled by a mute somewhere else is worse than no slider (hub §2). */
+export function setMuted(v) {
+  const next = !!v;
+  if (next === isMuted) return;
+  isMuted = next;
+  try { localStorage.setItem(KEY_MUTE, next ? '1' : '0'); } catch { /* private mode or quota */ }
+  announce();
+}
+
+/** Subscribe to both volumes and the mute. Returns the unsubscribe function. */
 export function onVolume(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);

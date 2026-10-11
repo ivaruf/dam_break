@@ -132,13 +132,6 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
     </div>
 
     <div id="hud-toast" aria-live="polite"></div>
-    <!-- The menu plate: the hub's three bars, drawn to the path data every
-         cabinet shares, not a ☰ character the font gets to draw. It opens the
-         pause menu; Escape does the same. -->
-    <button id="btn-hud-menu" class="tool-btn" type="button" title="Meny (Esc)" aria-label="Meny"
-            data-i18n-label="hud.menu" data-i18n-title="hud.menuTitle">
-      <svg class="menu-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-    </button>
 
     <!-- ==================== THE BOTTOM STACK ====================
          One bottom-anchored flex column owns EVERYTHING at the foot of the
@@ -248,6 +241,37 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
       <button class="big-btn pulse" id="btn-play" type="button" data-i18n="title.play">▶ SPILL</button>
       <button class="small-btn" id="btn-sandbox" type="button" data-i18n="title.sandbox">⚒ SANDKASSE</button>
       <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ NY VERSJON KLAR</button>
+      <!-- The language row on the title itself, so a stranger who cannot read
+           the Norwegian the game opened in finds English before anything else.
+           It used to live only behind the corner speaker and in the pause menu,
+           which the owner could not find (2026-10-11). Third copy: -t ids. -->
+      <div class="vol-row lang-row">
+        <span class="vol-label" id="lang-label-t" data-i18n="menu.lang">SPRÅK</span>
+        <div class="lang-seg" role="group" aria-labelledby="lang-label-t">
+          <button type="button" class="lang-btn" data-lang="nb" lang="nb" aria-pressed="true">
+            <svg class="flag" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
+              <rect width="22" height="16" fill="#ba0c2f"/>
+              <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
+              <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
+            </svg>
+            <span>Norsk</span>
+          </button>
+          <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">
+            <svg class="flag" viewBox="0 0 60 30" aria-hidden="true" focusable="false">
+              <clipPath id="uk-clip-t"><path d="M0 0v30h60V0z"/></clipPath>
+              <clipPath id="uk-diag-t"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
+              <g clip-path="url(#uk-clip-t)">
+                <path d="M0 0v30h60V0z" fill="#012169"/>
+                <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
+                <path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-diag-t)" stroke="#c8102e" stroke-width="4"/>
+                <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
+                <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
+              </g>
+            </svg>
+            <span>English</span>
+          </button>
+        </div>
+      </div>
       <!-- Leaving the game itself — the hub's one way out, drawn the same in
            every cabinet: LAST in the column, full width, a ghost plate, the
            shared back arrow, sentence case. Stays hidden until screens.js
@@ -280,28 +304,51 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
     </div>
   </div>
 
-  <!-- ==================== SOUND ====================
-       Two levels, set once, behind a door — in-play chrome competes with the
-       valley for both attention and screen, and a control that is only ever
-       touched once does not belong permanently on the title screen.
+  <!-- ==================== THE MENU ====================
+       The game's ONE menu panel, and the only thing the three-bar plate in the
+       corner opens (hub §2, "The corner: three plates"). It has two faces and
+       one body:
 
-       THE HINT LINE IS THE POINT. DAM BREAK has no audio whatsoever: no
-       music, no cues, no AudioContext anywhere in the repo. Two sliders that
-       silently did nothing would be a lie, so this one says so. What it is
-       for is written in src/ui/sound.js — the levels are stored for real, so
-       the day the water gets a voice it arrives where the player set it. -->
-  <div id="screen-sound" class="screen hidden">
-    <div class="end-card sound-card">
+         IN A LEVEL (build or sim) it is the in-play menu and it PAUSES: the
+         flood stops (sim) and the countdown stops (build) for as long as it is
+         up, and closing it — RESUME, Escape, or the plate again — puts the
+         speed back exactly as it was. Leaving the level is a button here
+         (LEVELS), never a keystroke: Escape must not throw a run away in one
+         press (hub §1).
+
+         ANYWHERE ELSE (title, level list, result card) it is the same panel's
+         Settings face: no RESUME and no LEVELS, a BACK in their place that
+         returns to whichever screen it was opened over.
+
+       Either face then carries the same body: the two faders, the honest line
+       about there being nothing to hear, the language row, and the way out to
+       the arcade LAST. There used to be a separate sound panel behind a
+       speaker in the corner; it folded into this on 2026-10-11, when the
+       speaker became a plain mute and the hub's corner became three plates.
+       src/ui/screens.js picks the face (openMenu()). -->
+  <div id="screen-pause" class="screen hidden">
+    <div class="end-card pause-card">
       <div class="screen-head">
-        <h2 data-i18n="sound.title">LYD</h2>
-        <p class="tagline" data-i18n="sound.tagline">Ingenting å høre ennå.</p>
+        <h2 id="pause-heading" data-i18n="pause.title">PAUSE</h2>
+      </div>
+      <div class="menu-col pause-actions">
+        <button class="big-btn primary-btn" id="btn-pause-resume" type="button" data-i18n="pause.resume">▶ FORTSETT</button>
+        <button class="small-btn" id="btn-pause-levels" type="button" data-i18n="result.levels">NIVÅER</button>
+        <button class="small-btn hidden" id="btn-menu-back" type="button" data-i18n="menu.back">TILBAKE</button>
       </div>
 
       <!-- One wrapper around all three rows — the two faders and the language
            — so the short-landscape pass can stand the whole set beside the
-           text as a single grid area, without any of this markup moving. The
-           language row shares the faders' label gutter, so SPRÅK, MUSIKK and
-           EFFEKTER all start their controls at the same x. -->
+           buttons as a single grid area, without any of this markup moving.
+           The language row shares the faders' label gutter, so SPRÅK, MUSIKK
+           and EFFEKTER all start their controls at the same x.
+
+           THE HINT LINE IS THE POINT. DAM BREAK has no audio whatsoever: no
+           music, no cues, no AudioContext anywhere in the repo. Two sliders
+           that silently did nothing would be a lie, so the line under them
+           says so. What they are for is written in src/ui/sound.js — the
+           levels are stored for real, so the day the water gets a voice it
+           arrives where the player set it. -->
       <div class="vol-rows">
         <div class="vol-row">
           <label class="vol-label" for="vol-music" data-i18n="sound.music">MUSIKK</label>
@@ -317,70 +364,9 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
             <output id="vol-sfx-out" for="vol-sfx">80</output>
           </div>
         </div>
-        <!-- THE LANGUAGE ROW (hub §2, "Two languages, Norwegian first").
-             Here because this panel is what the corner speaker opens from the
-             title screen, so a stranger finds English before a single level.
-             The flags are kitchens' two SVGs to the path; the clipPath ids
-             carry a suffix, because the same row is repeated in the pause
-             menu and ids are page-global. Endonyms stay in their own
-             language whatever the current one is. -->
-        <div class="vol-row lang-row">
-          <span class="vol-label" id="lang-label-a" data-i18n="menu.lang">SPRÅK</span>
-          <div class="lang-seg" role="group" aria-labelledby="lang-label-a">
-            <button type="button" class="lang-btn" data-lang="nb" lang="nb" aria-pressed="true">
-              <svg class="flag" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
-                <rect width="22" height="16" fill="#ba0c2f"/>
-                <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
-                <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
-              </svg>
-              <span>Norsk</span>
-            </button>
-            <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">
-              <svg class="flag" viewBox="0 0 60 30" aria-hidden="true" focusable="false">
-                <clipPath id="uk-clip-a"><path d="M0 0v30h60V0z"/></clipPath>
-                <clipPath id="uk-diag-a"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
-                <g clip-path="url(#uk-clip-a)">
-                  <path d="M0 0v30h60V0z" fill="#012169"/>
-                  <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
-                  <path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-diag-a)" stroke="#c8102e" stroke-width="4"/>
-                  <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
-                  <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
-                </g>
-              </svg>
-              <span>English</span>
-            </button>
-          </div>
-        </div>
-
-      </div>
-
-      <p class="hint sound-note" data-i18n="sound.note">⚠ DAM BREAK er helt stille — ingen musikk, ingen lyder, ingenting disse to glidebryterne kan skru på i dag. De blir likevel lagret på denne enheten, så når vannet en dag får en stemme, kommer den på nivået du valgte og ikke på full guffe.</p>
-
-      <button class="small-btn" id="btn-sound-back" type="button" data-i18n="menu.back">TILBAKE</button>
-    </div>
-  </div>
-
-  <!-- ==================== THE IN-PLAY MENU ====================
-       What the HUD's three-bar plate opens, and what Escape opens mid-level.
-       It PAUSES: the flood stops (sim) and the countdown stops (build) for as
-       long as it is up, and closing it — RESUME, Escape, or the plate's own
-       Escape — puts the speed back exactly as it was, so the run carries on
-       where it was left. Leaving the level is a button here (LEVELS), never a
-       keystroke: Escape must not throw a run away in one press (hub §1).
-
-       Top level, one column, the hub's order: the way back in first, the
-       language row (hub §2 wants it in this menu), and the way out to the
-       arcade LAST, full width, a little apart from the rest. -->
-  <div id="screen-pause" class="screen hidden">
-    <div class="end-card pause-card">
-      <div class="screen-head">
-        <h2 data-i18n="pause.title">PAUSE</h2>
-      </div>
-      <div class="menu-col pause-actions">
-        <button class="big-btn primary-btn" id="btn-pause-resume" type="button" data-i18n="pause.resume">▶ FORTSETT</button>
-        <button class="small-btn" id="btn-pause-levels" type="button" data-i18n="result.levels">NIVÅER</button>
-        <!-- The language row, moved here from the level screen with its -b
-             flag ids; the sound panel's copy keeps -a. -->
+        <!-- THE LANGUAGE ROW (hub §2, "Two languages, Norwegian first"),
+             in the menu; the title screen carries its own copy (-t). The
+             clipPath ids carry a suffix because ids are page-global. -->
         <div class="vol-row lang-row">
           <span class="vol-label" id="lang-label-b" data-i18n="menu.lang">SPRÅK</span>
           <div class="lang-seg" role="group" aria-labelledby="lang-label-b">
@@ -408,11 +394,14 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
             </button>
           </div>
         </div>
-        <button class="small-btn quit-btn hidden" id="btn-quit-pause" type="button">
-          <svg class="quit-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5m6-6-6 6 6 6"/></svg>
-          <span class="quit-label"></span>
-        </button>
       </div>
+
+      <p class="hint sound-note" data-i18n="sound.note">⚠ DAM BREAK er helt stille ennå. Nivåene lagres likevel, så når vannet får en stemme, kommer den på nivået du valgte.</p>
+
+      <button class="small-btn quit-btn hidden" id="btn-quit-pause" type="button">
+        <svg class="quit-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5m6-6-6 6 6 6"/></svg>
+        <span class="quit-label"></span>
+      </button>
     </div>
   </div>
 
@@ -432,46 +421,54 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
   </div>
 
   <!-- ==================== THE CORNER ====================
-       Sound and fullscreen as icons, top right. Neither belongs to a dam and
-       neither is a setting of the game, so neither earns a row on the title
-       screen; and in a corner at this size a symbol survives where a word
-       would have to be shrunk until nobody read it.
+       Three plates, top right, the same three in every cabinet of the arcade
+       (hub §2, "The corner: three plates, on every screen, and nothing else up
+       there"). Left to right: MENU, SOUND, FULLSCREEN — so fullscreen is the
+       one in the actual corner. Three kinds of thing: only the menu touches
+       the game; the speaker changes the sound; fullscreen changes the window.
 
-       ON EVERY SCREEN AND THROUGH EVERY RUN, FIXED TO THE PAGE. It used to be
-       taken away for build and sim, on the argument that ☰ LEVELS already owned
-       this corner and two things cannot have one. What that actually bought the
-       player was a game they could not go fullscreen in once they had started
-       it, and a volume they could only change by abandoning the level — a
-       control that goes away when the screen changes is not a corner, it is a
-       menu item that happens to sit in one. So ☰ moved instead: one row down,
-       flush with this strip's right edge, inside the column the HUD reserves
-       (styles.css, --hud-menu-gap). Reading in from the corner it is
-       fullscreen, sound, then ☰ — the page's pair outermost, the run's own
-       button inside them, because only one of the three outlives a level.
+       ON EVERY SCREEN AND THROUGH EVERY RUN, FIXED TO THE PAGE. Until
+       2026-10-11 the title had only a speaker (which opened a sound panel)
+       and fullscreen, and the three bars lived one row down inside the HUD,
+       so the owner found a game with "no menu as such and nowhere to choose
+       eng/nor". Now the bars are here on the title too, opening the menu's
+       Settings face, and in a level the same plate opens the in-play menu and
+       pauses. The HUD keeps the column under this strip clear
+       (styles.css, --hud-menu-gap) and has no button of its own up here.
 
-       Art carries the meaning, so both buttons carry a real aria-label and
-       title — and src/ui/screen.js rewrites the second one as the state
-       changes, because the label is the only thing that can tell a screen
-       reader which way the toggle is currently pointing. -->
-  <!-- Plain markup, never hidden and never touched by JS: the first thing this
-       game paints behind the splash is the title screen, so visible is already
-       the right answer, and the cluster must not depend on a boot that it
-       exists to outlive. -->
+       Art carries the meaning, so every plate carries a real aria-label and
+       title, and the two toggles an aria-pressed that CSS reads to pick the
+       glyph — src/ui/screens.js writes the speaker's, src/ui/screen.js the
+       fullscreen one's, each in the same breath as its label. -->
+  <!-- Plain markup, never hidden as a whole and never moved by JS: the first
+       thing this game paints behind the splash is the title screen, so
+       visible is already the right answer, and the cluster must not depend on
+       a boot that it exists to outlive. -->
   <div id="corner-tools">
-    <button id="btn-sound" class="tool-btn" type="button" title="Lyd" aria-label="Lyd" data-i18n-label="corner.sound">
-      <!-- A speaker and two waves. Deliberately WITHOUT a slash: this opens a
-           panel, it is not a mute toggle. -->
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M11 5 6 9H3v6h3l5 4Z" fill="none" stroke="currentColor"
-              stroke-width="1.9" stroke-linejoin="round"/>
-        <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" fill="none"
-              stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    <!-- The menu plate: the hub's three bars, drawn to the shared path data,
+         not a ☰ character the font gets to draw. Its id is the one hud.js has
+         always bound (ui:menu); game.js hands that to screens.openMenu(). -->
+    <button id="btn-hud-menu" class="tool-btn" type="button" title="Meny" aria-label="Meny"
+            data-i18n-label="hud.menu">
+      <svg class="menu-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <!-- A LIVE MUTE: one tap, nothing opened, nothing paused, no focus moved.
+         aria-pressed="true" means muted. Both states are in the one <svg> —
+         the waves while audible, the slash while muted — and CSS picks off
+         aria-pressed. DAM BREAK has no audio yet, so this stores a choice
+         (src/ui/sound.js) that the water will honour the day it gets a voice. -->
+    <button id="btn-sound" class="tool-btn" type="button" aria-pressed="false"
+            title="Slå av lyden" aria-label="Slå av lyden">
+      <svg class="sound-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M11 5 6 9H3v6h3l5 4Z"/>
+        <path class="icon-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>
+        <path class="icon-slash" d="m15.5 9.5 6 5m0-5-6 5"/>
       </svg>
     </button>
     <!-- HIDDEN until src/ui/screen.js has confirmed this browser has element
          fullscreen at all — iPhone Safari does not, and a button that does
          nothing when pressed is worse than no button. The cluster just
-         shrinks to one icon there. -->
+         shrinks to two plates there. -->
     <button id="btn-screen" class="tool-btn" type="button" aria-pressed="false"
             title="Fullskjerm" aria-label="Fullskjerm" hidden>
       <!-- Four corners pushing out, and the same four pulled in for the

@@ -17,31 +17,30 @@ const el = (id) => document.getElementById(id);
 
 // What show() last raised, INCLUDING `null`, which is what a run looks like:
 // during build and sim no .screen is up at all and the HUD has the canvas to
-// itself. The sound panel is a door off wherever the player was standing —
-// title, level select, result, or a level in progress, since the corner speaker
-// is on every one of them now — so BACK has to know which, and the phase cannot
-// answer it: #btn-play raises the level select without ever leaving the 'title'
-// phase.
+// itself. The menu's Settings face is a door off wherever the player was
+// standing — title, level select or result, since the corner's three bars are
+// on every one of them — so BACK has to know which, and the phase cannot answer
+// it: #btn-play raises the level select without ever leaving the 'title' phase.
 let current = 'screen-title';
-let soundReturn = null;
-let pauseSpeed = null;   // the run's speed when the pause menu opened; see openPause()
+let menuReturn = null;   // the screen the Settings face was opened over
+let menuInPlay = false;  // which face #screen-pause is wearing; see openMenu()
+let pauseSpeed = null;   // the run's speed when the in-play menu opened
 
 function show(id) {
   for (const s of document.querySelectorAll('.screen')) s.classList.add('hidden');
   if (id) { const n = el(id); if (n) n.classList.remove('hidden'); }
   current = id || null;
-  // Whether a panel is standing over a level in progress — the pause menu, or
-  // the sound panel opened mid-run. Written HERE, the one place screens change,
+  // Whether a panel is standing over a level in progress — the in-play
+  // menu. Written HERE, the one place screens change,
   // and read by game.js and builder.js before they act on a key: a keystroke
   // meant for the menu (or a Space while it is up) must not also release the
   // flood, unpause it, or edit the dam hidden underneath.
   const scene = getScene();
   if (scene) scene.covered = !!current && (scene.phase === 'build' || scene.phase === 'sim');
-  if (current !== 'screen-pause' && current !== 'screen-sound') pauseSpeed = null;
   // Anything that raises another screen — a phase change, a level starting —
-  // has closed the sound panel by hiding it, so the way back out of it must not
-  // survive as a stale promise to return somewhere the player has left.
-  if (current !== 'screen-sound') soundReturn = null;
+  // has closed the menu by hiding it, so neither the speed it was holding nor
+  // the way back out of it may survive as a stale promise.
+  if (current !== 'screen-pause') { pauseSpeed = null; menuReturn = null; }
 }
 
 // ---- tutorial copy (level 1 only) ---------------------------------------
@@ -127,7 +126,7 @@ function dismissSplash() {
 /**
  * The quit buttons: one on the title screen and one in the pause menu, each at
  * the top level and last in its column (hub §2, "One button"). Never on the
- * level list, the sound panel or any other second panel.
+ * level list or any other second panel.
  *
  * They stay hidden unless the arcade's exit.js is actually there to answer,
  * because it is another repository's file and is allowed to be missing — and
@@ -209,10 +208,9 @@ function quitFromTitle() {
 
 // ---- the language row -----------------------------------------------------
 //
-// Two copies of it, both plain markup in index.html: one in the sound panel —
-// the panel the corner speaker opens from the title screen, from the level
-// list and mid-run, so a stranger can find English before a single level —
-// and one in the pause menu, which is what the HUD's menu plate opens. Every
+// Two copies of it, both plain markup in index.html: one on the title screen
+// itself, above the way out, so a stranger finds English before a single
+// level, and one in the menu panel the corner's three bars open. Every
 // [data-lang] button in the page is wired here; aria-pressed is the only state
 // and CSS reads it.
 function paintLangButtons() {
@@ -228,14 +226,16 @@ function wireLang() {
   }
   paintLangButtons();
 
-  // A switch repaints in place: no screen changes, no run is touched, the sound
-  // panel (which paused the flood when it opened) stays open and paused.
+  // A switch repaints in place: no screen changes, no run is touched, the menu
+  // (which paused the flood when it opened mid-run) stays open and paused.
   // i18n.js has already repainted every [data-i18n]; what is built here at
   // runtime is rebuilt here.
   if (typeof document.addEventListener === 'function') {
     document.addEventListener('arcade:lang', () => {
       paintLangButtons();
       paintQuit();
+      paintMenuFace();
+      paintMute();
       const tut = el('tutorial');
       if (tut && !tut.classList.contains('hidden')) renderTutorial();
       buildLevelGrid();
@@ -244,12 +244,11 @@ function wireLang() {
   }
 }
 
-// ---- the sound panel ----------------------------------------------------
+// ---- the faders and the mute ---------------------------------------------
 //
-// There is no paintCorner() any more, and deliberately none: #corner-tools is
-// fixed page chrome that nothing here shows or hides. It used to be taken away
-// for build and sim — index.html and styles.css both carry the reasoning for
-// why it is not, and why ☰ LEVELS moved one row down instead.
+// There is no paintCorner(), and deliberately none: #corner-tools is fixed page
+// chrome that nothing here shows or hides. The speaker inside it is a live mute
+// (hub §2, "three kinds of thing"), and the two faders live in the menu panel.
 
 /**
  * One fader. src/ui/sound.js owns the value and the storage; this owns nothing
@@ -274,60 +273,94 @@ function wireFader(inputId, outId, read, write) {
   // while it is still moving. It is also the hook the day this game gets audio
   // — hearing the level you are setting is the whole point of a volume
   // control, and sound.js's onVolume() is where that listens.
+  //
+  // And it LIFTS THE MUTE (hub §2, "Dragging a slider must make a sound, and
+  // must lift the mute"): a level you are setting must not be silently
+  // cancelled by a speaker plate somewhere else.
   input.addEventListener('input', () => {
     const v = Math.max(0, Math.min(100, Math.round(Number(input.value) || 0)));
     paint(v);
     write(v / 100);
+    if (sound.muted()) { sound.setMuted(false); paintMute(); }
   });
 }
 
-/**
- * Open the sound panel from wherever the player pressed the corner speaker.
- *
- * The speaker is on every screen now, so "back to the title" is only the right
- * answer when the title is where they were: the screen showing at the moment
- * the door opened is remembered instead, and `null` — a level in progress, with
- * no .screen up at all — is a perfectly good thing to remember and return to.
- *
- * AND MID-RUN IT STOPS THE WATER. A menu that leaves the flood rising behind it
- * is a menu that costs the player the level for looking at it: the valley does
- * not pause itself the way a screen change pauses maxgear's, so opening this
- * from 'sim' asks for speed 0 through the same ui:speed channel the ⏸ button
- * uses, and leaves it there. Coming back lands on a stopped sim with ⏸ lit,
- * never on a run that has been going without anybody watching — the player
- * restarts it themselves with 1× or the spacebar. Build has nothing to stop.
- */
-function openSound() {
-  if (current === 'screen-sound') return;
-  soundReturn = current;
-  if (getScene().phase === 'sim') emit('ui:speed', { v: 0 });
-  show('screen-sound');
+/* The speaker plate's state and words, from sound.js's one flag. aria-pressed
+ * is what CSS reads to swap the waves for the slash, written in the same
+ * breath as the label, so the picture and what a reader hears cannot drift. */
+function paintMute() {
+  const b = el('btn-sound');
+  if (!b || typeof b.setAttribute !== 'function') return;
+  const m = sound.muted();
+  const label = t(m ? 'corner.unmute' : 'corner.mute');
+  b.setAttribute('aria-pressed', String(m));
+  b.setAttribute('aria-label', label);
+  b.title = label;
 }
 
-/** The one way out of the panel, so BACK and Escape cannot leave by different
- *  doors. Returns whether there was anything to close — game.js asks. */
-export function closeSound() {
-  if (current !== 'screen-sound') return false;
-  show(soundReturn);   // null means the run it was opened over
-  return true;
+function wireSound() {
+  wireFader('vol-music', 'vol-music-out', sound.music, sound.setMusic);
+  wireFader('vol-sfx', 'vol-sfx-out', sound.sfx, sound.setSfx);
+
+  // One tap, live: nothing opens, no run pauses, focus stays where it was.
+  const mute = el('btn-sound');
+  if (mute) mute.addEventListener('click', () => { sound.setMuted(!sound.muted()); paintMute(); });
+  paintMute();
 }
 
-// ---- the in-play menu ----------------------------------------------------
+// ---- the menu ---------------------------------------------------------------
 //
-// What the HUD's three-bar plate opens, and what Escape opens mid-level. It
-// stops the run — speed 0 through the same ui:speed channel the ⏸ button uses,
-// which also freezes a countdown build, because build ticks on the same speed —
-// and remembers the speed it found, so closing it puts the run back exactly as
-// it was: a 2× flood resumes at 2×, an already-paused one stays paused. The
-// remembered speed survives a detour through the sound panel (the corner is
-// live over this menu) and is forgotten the moment any other screen comes up.
-// (`pauseSpeed` itself is declared at the top, beside `current`.)
+// ONE panel, #screen-pause, and the corner's three bars are its only door
+// (Escape aside). In a level it is the in-play menu: it stops the run — speed 0
+// through the same ui:speed channel the ⏸ button uses, which also freezes a
+// countdown build, because build ticks on the same speed — and remembers the
+// speed it found, so closing it puts the run back exactly as it was: a 2× flood
+// resumes at 2×, an already-paused one stays paused. Anywhere else it is the
+// Settings face of the same panel: no RESUME and no LEVELS, a BACK to the
+// screen it was opened over, and nothing to pause.
+
+function inLevel() {
+  const scene = getScene();
+  return !!scene && (scene.phase === 'build' || scene.phase === 'sim');
+}
+
+/* Which face the panel is wearing: the heading, and which of RESUME + LEVELS
+ * or BACK is showing. Re-run on a language switch, because the heading's
+ * [data-i18n] key is rewritten here rather than by paintStatic. */
+function paintMenuFace() {
+  const head = el('pause-heading');
+  if (head) {
+    const key = menuInPlay ? 'pause.title' : 'menu.settings';
+    if (head.dataset) head.dataset.i18n = key;
+    head.textContent = t(key);
+  }
+  const toggle = (id, on) => { const n = el(id); if (n) n.classList.toggle('hidden', !on); };
+  toggle('btn-pause-resume', menuInPlay);
+  toggle('btn-pause-levels', menuInPlay);
+  toggle('btn-menu-back', !menuInPlay);
+}
+
+/** What the three-bar plate does: the in-play menu over a level, the Settings
+ *  face anywhere else, and — pressed again while the panel is up — the same as
+ *  Escape, closing it. */
+export function openMenu() {
+  if (current === 'screen-pause') { closeMenu(); return; }
+  if (!current && inLevel()) { openPause(); return; }
+  menuInPlay = false;
+  menuReturn = current;
+  paintMenuFace();
+  show('screen-pause');
+  const back = el('btn-menu-back');
+  if (back && typeof back.focus === 'function') back.focus();
+}
 
 export function openPause() {
   const scene = getScene();
-  if (!scene || (scene.phase !== 'build' && scene.phase !== 'sim')) return;
+  if (!inLevel()) return;
   if (current === 'screen-pause') return;
-  if (current !== 'screen-sound') pauseSpeed = scene.simSpeed;
+  pauseSpeed = scene.simSpeed;
+  menuInPlay = true;
+  paintMenuFace();
   emit('ui:speed', { v: 0 });
   emit('ui:pause', {});   // builder.js drops any drag in flight
   show('screen-pause');
@@ -335,11 +368,18 @@ export function openPause() {
   if (resume && typeof resume.focus === 'function') resume.focus();
 }
 
-export function closePause() {
+/** The one way out of the panel, either face, so RESUME, BACK, the plate and
+ *  Escape cannot leave by different doors. Returns whether there was anything
+ *  to close — escape() asks. */
+export function closeMenu() {
   if (current !== 'screen-pause') return false;
-  const speed = pauseSpeed;
-  show(null);
-  if (speed !== null) emit('ui:speed', { v: speed });
+  if (menuInPlay) {
+    const speed = pauseSpeed;
+    show(null);
+    if (speed !== null) emit('ui:speed', { v: speed });
+  } else {
+    show(menuReturn || 'screen-title');
+  }
   return true;
 }
 
@@ -348,43 +388,33 @@ export function closePause() {
  * and from the start screen that step is the arcade"). game.js calls this and
  * nothing else on Escape; input.js has already swallowed the key's default.
  *
- *   sound panel           → its BACK (to wherever it was opened from)
- *   pause menu            → close it, the run carries on
+ *   menu (either face)    → close it: the run carries on, or BACK to where
+ *                           the Settings face was opened from
  *   level list            → its BACK, to the title
  *   result card           → LEVELS, the card's own way back
- *   a level, nothing open → open the pause menu (and pause)
+ *   a level, nothing open → open the in-play menu (and pause)
  *   title, nothing open   → the way out, only if that button is showing
  *
  * So no single press ever throws a run away, and Escape, Escape from anywhere
  * lands on the title, which has the way out on it.
  */
 export function escape() {
-  if (closeSound()) return;
-  if (closePause()) return;
+  if (closeMenu()) return;
   if (current === 'screen-levels') { show('screen-title'); return; }
   if (current === 'screen-result') { buildLevelGrid(); show('screen-levels'); return; }
-  const scene = getScene();
-  if (!current && scene && (scene.phase === 'build' || scene.phase === 'sim')) { openPause(); return; }
+  if (!current && inLevel()) { openPause(); return; }
   if (current === 'screen-title') quitFromTitle();
 }
 
 function wirePause() {
   const resume = el('btn-pause-resume');
-  if (resume) resume.addEventListener('click', closePause);
+  if (resume) resume.addEventListener('click', closeMenu);
+  const back = el('btn-menu-back');
+  if (back) back.addEventListener('click', closeMenu);
   // Leaving the level is a deliberate tap here, never a keystroke — the same
   // destination the menu plate used to jump straight to.
   const levels = el('btn-pause-levels');
   if (levels) levels.addEventListener('click', () => emit('ui:levels', {}));
-}
-
-function wireSound() {
-  wireFader('vol-music', 'vol-music-out', sound.music, sound.setMusic);
-  wireFader('vol-sfx', 'vol-sfx-out', sound.sfx, sound.setSfx);
-
-  const open = el('btn-sound');
-  if (open) open.addEventListener('click', openSound);
-  const back = el('btn-sound-back');
-  if (back) back.addEventListener('click', closeSound);
 }
 
 // ---- init ---------------------------------------------------------------
@@ -583,7 +613,7 @@ function showResult() {
 
 // Everything on the result card, in the current language. Separate from
 // showResult() so a language switch can repaint the card where it stands —
-// including while the sound panel is open over it — without raising anything.
+// including while the menu's Settings face is open over it — without raising anything.
 function paintResult() {
   const S = getScene();
   const st = S.stats || {};

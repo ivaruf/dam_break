@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.13.0'; // one way out, drawn like every other cabinet's — and the menu plate and Escape pause the run instead of abandoning it
+const VERSION = 'v2.14.0'; // three plates in the corner on every screen — menu, mute, fullscreen — one menu panel holding the faders, the language and the way out, and the language on the title itself
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
