@@ -3,7 +3,8 @@
 // Two languages, bokmål first (hub CLAUDE.md §2, "Two languages, Norwegian
 // first"). With nothing valid stored the game speaks Norwegian WHATEVER the
 // browser prefers — no navigator.language sniffing; an English speaker is one
-// tap away, on the language row in the sound panel or the pause menu.
+// tap away, on the language row in the menu panel behind the corner's three
+// bars — the one place language and sound live in every arcade cabinet.
 //
 // THE CHOICE IS THE HUB'S, NOT THIS CABINET'S. It lives under the one key every
 // arcade game shares, 'arcade.lang.v1', holding "nb" or "en" and nothing else,
@@ -189,7 +190,7 @@ const STRINGS = {
     // ---- the menu panel's sound rows ----
     'sound.music': 'MUSIKK',
     'sound.sfx': 'EFFEKTER',
-    'sound.note': '⚠ DAM BREAK er helt stille ennå. Nivåene lagres likevel, så når vannet får en stemme, kommer den på nivået du valgte.',
+    'sound.note': 'Musikk og effekter stilles hver for seg. Høyttaleren i hjørnet slår all lyd av og på.',
 
     // ---- corner + HUD chrome ----
     'corner.mute': 'Slå av lyden',
@@ -427,7 +428,7 @@ const STRINGS = {
 
     'sound.music': 'MUSIC',
     'sound.sfx': 'EFFECTS',
-    'sound.note': '⚠ DAM BREAK is silent for now. The levels are saved anyway, so when the water gets a voice it arrives at the level you chose.',
+    'sound.note': 'Music and effects are set separately. The speaker in the corner switches all sound off and on.',
 
     'corner.mute': 'Mute',
     'corner.unmute': 'Unmute',

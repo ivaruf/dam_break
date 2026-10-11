@@ -1,28 +1,20 @@
 // OPUS C owns. The two volume levels and the mute — and NOTHING else.
 //
-// DAM BREAK has no audio. Not a muted engine, not a stub synth: there is no
-// AudioContext anywhere in this repo and nothing that could make a sound. So
-// why is this file here?
+// The mixer is src/ui/audio.js, and it takes exactly two things from here and
+// no other route to them:
 //
-// Because the hub is fitting one sound panel to every arcade game, and a
-// volume the player sets has to survive the day the audio actually lands.
-// Storing it is cheap; asking a player to find the panel again after their
-// first flood arrives at full blast is not. The panel says so out loud (see
-// the menu panel, #screen-pause in index.html) — two sliders that quietly do nothing would be
-// a lie, two sliders that admit they are a reservation are not.
+//   music()/sfx()/muted()   the current gains, 0..1, and the corner's mute
+//   onVolume(fn)            a subscription, fired whenever any of them moves,
+//                           so the buses track a slider while it is dragged
 //
-// THIS IS THE ONE PLACE A FUTURE AUDIO SYSTEM PLUGS IN. It needs exactly two
-// things from here and should take no other route to them:
+// Setting a volume MAKES a sound while you set it (hub §2) — a control you
+// cannot hear is a control you cannot use. That audition lives in audio.js's
+// onVolume() listener, not in screens.js, which knows about sliders and should
+// never learn about gain nodes.
 //
-//   music()/sfx()      the current gains, 0..1, ready to multiply
-//   onVolume(fn)       a subscription, fired whenever either one moves, so a
-//                      live mixer tracks the slider while it is being dragged
-//
-// When that day comes, the contract's other half (hub CLAUDE.md §9 and the
-// corner-cluster brief) is that setting a volume must MAKE a sound while you
-// set it — a control you cannot hear is a control you cannot use. Wire that
-// into onVolume() here rather than into screens.js, which knows about sliders
-// and should never learn about gain nodes.
+// These levels predate the audio by a release: the panel shipped while the
+// game was still silent, so a player who set them then hears the water at the
+// level they chose.
 //
 // Keys are versioned per hub CLAUDE.md §6 and are now permanent: a key holding
 // a player's setting can never be renamed without silently resetting it, which
@@ -41,8 +33,7 @@ const DEFAULT_MUSIC = 0.6;
 const DEFAULT_SFX = 0.8;
 
 // Read once at module load, written through on every change. Nothing here
-// touches localStorage per frame; a future mixer reads these numbers, not the
-// store.
+// touches localStorage per frame; the mixer reads these numbers, not the store.
 let musicVol = load(KEY_MUSIC, DEFAULT_MUSIC);
 let sfxVol = load(KEY_SFX, DEFAULT_SFX);
 let isMuted = (() => {
@@ -101,8 +92,8 @@ export function setSfx(v) {
 
 export function muted() { return isMuted; }
 
-/** Mute or unmute. A future mixer multiplies by (muted ? 0 : level); the
- *  levels themselves are untouched, so unmuting lands back where they were.
+/** Mute or unmute. The mixer drops its master gain to 0; the levels
+ *  themselves are untouched, so unmuting lands back where they were.
  *  Dragging either fader lifts the mute (screens.js) — a slider silently
  *  cancelled by a mute somewhere else is worse than no slider (hub §2). */
 export function setMuted(v) {

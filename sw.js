@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.14.1'; // precache reads past the browser's HTTP cache, so an update can never mix old and new files
+const VERSION = 'v2.15.0'; // the dam gets a voice: Sonic Pi themes for menu, build and flood, and cues for every beam, break and wave
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
@@ -42,6 +42,7 @@ const ASSETS = [
   './src/ui/titleScene.js',
   './src/ui/screens.js',
   './src/ui/sound.js',
+  './src/ui/audio.js',
   // Loaded by index.html as its OWN module script rather than imported by
   // main.js, so it has to be listed here in its own right — nothing else
   // would ever pull it into the cache.
@@ -49,6 +50,29 @@ const ASSETS = [
   './src/ui/debug.js',
   './src/levels/levels.js',
   './src/levels/levelLoader.js',
+  // The sound, all of it (src/ui/audio.js): three looping themes and the cues.
+  // Precached like any shipped file, or an offline flood would be a silent one.
+  './audio/music-title.m4a',
+  './audio/music-build.m4a',
+  './audio/music-flood.m4a',
+  './audio/tap.m4a',
+  './audio/chime.m4a',
+  './audio/tick.m4a',
+  './audio/place-timber.m4a',
+  './audio/place-steel.m4a',
+  './audio/place-concrete.m4a',
+  './audio/place-cable.m4a',
+  './audio/remove.m4a',
+  './audio/refuse.m4a',
+  './audio/release.m4a',
+  './audio/splash.m4a',
+  './audio/gush.m4a',
+  './audio/creak.m4a',
+  './audio/break-wood.m4a',
+  './audio/break-metal.m4a',
+  './audio/break-stone.m4a',
+  './audio/win.m4a',
+  './audio/fail.m4a',
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',

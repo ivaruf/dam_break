@@ -3,6 +3,7 @@
 import * as game from './core/game.js';
 import { emit } from './core/events.js';
 import { t } from './i18n.js';
+import * as audio from './ui/audio.js';
 
 const canvas = document.getElementById('game');
 
@@ -19,16 +20,20 @@ window.addEventListener('resize', resize);
 resize();
 
 game.boot(canvas);
+// After boot, so the mixer's listeners sit behind the game's own. It builds
+// nothing until the first gesture; see src/ui/audio.js.
+audio.init();
 
 function loop(now) {
   resize();
   game.frame(now);
+  audio.frame();
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 
 // Console debugging handle (not a public API).
-window.DAM = { game, emit };
+window.DAM = { game, emit, audio };
 
 // ---- service worker: versioned precache with opt-in updates (maxgear model)
 

@@ -208,11 +208,12 @@ function quitFromTitle() {
 
 // ---- the language row -----------------------------------------------------
 //
-// Two copies of it, both plain markup in index.html: one on the title screen
-// itself, above the way out, so a stranger finds English before a single
-// level, and one in the menu panel the corner's three bars open. Every
-// [data-lang] button in the page is wired here; aria-pressed is the only state
-// and CSS reads it.
+// One copy, plain markup in index.html, in the menu panel the corner's three
+// bars open — on the title too, through the panel's Settings face. It stood on
+// the title screen itself for a day (2026-10-11) until the hub settled that
+// language and sound live in that panel and nowhere else. Every [data-lang]
+// button in the page is wired here; aria-pressed is the only state and CSS
+// reads it.
 function paintLangButtons() {
   const lang = getLang();
   for (const b of document.querySelectorAll('[data-lang]')) {
@@ -270,9 +271,9 @@ function wireFader(inputId, outId, read, write) {
   paint(start);
 
   // 'input', not 'change': the number beside the fader has to track the thumb
-  // while it is still moving. It is also the hook the day this game gets audio
-  // — hearing the level you are setting is the whole point of a volume
-  // control, and sound.js's onVolume() is where that listens.
+  // while it is still moving, and so does the gain — src/ui/audio.js hears
+  // every write through sound.js's onVolume() and auditions the bus that moved.
+  // This file knows about sliders and never learns about gain nodes.
   //
   // And it LIFTS THE MUTE (hub §2, "Dragging a slider must make a sound, and
   // must lift the mute"): a level you are setting must not be silently

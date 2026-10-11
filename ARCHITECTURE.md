@@ -74,8 +74,13 @@ OPUS C — Rendering, UX & Content:
   src/rendering/renderer.js   src/rendering/waterRenderer.js  src/rendering/effects.js
   src/ui/hud.js  src/ui/screens.js  src/ui/debug.js  src/ui/titleScene.js
   src/ui/sound.js             (the two stored volume levels and the mute — NOT an audio
-                               engine; this game has no audio yet, and that
-                               file explains why the levels exist anyway)
+                               engine; it owns the numbers and their storage)
+  src/ui/audio.js             (the mixer: Sonic Pi themes + cues from audio/*.m4a on a
+                               MUSIC and an EFFECTS bus under a mute master. Listens
+                               to §6 events and reads getScene() once a frame from
+                               main.js; writes nothing to the scene and is imported
+                               by nothing in physics or tests. Pieces + encoders:
+                               tools/audio/)
   src/ui/screen.js            (the corner cluster's fullscreen toggle; loaded
                                by index.html as its own module script, imports
                                nothing and exports nothing, and is NOT named
@@ -293,7 +298,8 @@ import { on, off, emit } from '../core/events.js';
 | `phase:change`   | `{phase}`                                      | game    |
 | `ui:release` `ui:retry` `ui:edit` `ui:menu` `ui:speed{v}` `ui:material{id}` `ui:tool{id}` `ui:undo` `ui:redo` `ui:delete` `ui:clear` | | hud |
 | `ui:level`       | `{index}` (1-based campaign index)             | screens |
-| `design:change`  | `{action:'place'\|'delete', id}` (sounds/UI refresh) | builder |
+| `design:change`  | `{action:'place'\|'delete', id}` (sounds/UI refresh; place adds `mat`, delete adds `count`) | builder |
+| `design:refuse`  | `{kind:'bad'\|'budget'\|'local'}` — a click the rules refused (the refusal sound) | builder |
 | `input:down/move/up` | `{x, y, px, py, id, button, cancel, ptype}` (ptype: 'touch'\|'mouse'\|'pen' — a touch gesture gets the wider CONFIG.touch snap radii) | input   |
 | `input:pan` `{dx,dy}` px · `input:zoom` `{px,py,factor}` · `input:key` `{key}` | | input |
 
@@ -458,4 +464,4 @@ with numeric assertions (e.g. "deep water bottom-member load > 2× top-member").
 
 1. water↔structure interaction  2. structural failure  3. player understanding
 4. construction feel  5. water looks  6. performance (60fps target)  7. levels
-8. UI polish  9. audio (skip for v1).
+8. UI polish  9. audio (landed v2.15: src/ui/audio.js, tools/audio/).

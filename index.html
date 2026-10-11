@@ -236,42 +236,15 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
     </div>
     <!-- One column of doors, laid out as one (hub §2, "anything that is one
          logical group is laid out as one"): a grid that stretches every member
-         to the widest, so PLAY, SANDBOX and the way out share both edges. -->
+         to the widest, so PLAY, SANDBOX and the way out share both edges.
+         The ways in, then the way out LAST. The language row stood here
+         between them from 2026-10-11 until the hub settled that language and
+         sound live behind the corner's three bars and nowhere else — the
+         menu panel below carries the one copy. -->
     <div class="menu-col title-actions">
       <button class="big-btn pulse" id="btn-play" type="button" data-i18n="title.play">▶ SPILL</button>
       <button class="small-btn" id="btn-sandbox" type="button" data-i18n="title.sandbox">⚒ SANDKASSE</button>
       <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ NY VERSJON KLAR</button>
-      <!-- The language row on the title itself, so a stranger who cannot read
-           the Norwegian the game opened in finds English before anything else.
-           It used to live only behind the corner speaker and in the pause menu,
-           which the owner could not find (2026-10-11). Third copy: -t ids. -->
-      <div class="vol-row lang-row">
-        <span class="vol-label" id="lang-label-t" data-i18n="menu.lang">SPRÅK</span>
-        <div class="lang-seg" role="group" aria-labelledby="lang-label-t">
-          <button type="button" class="lang-btn" data-lang="nb" lang="nb" aria-pressed="true">
-            <svg class="flag" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
-              <rect width="22" height="16" fill="#ba0c2f"/>
-              <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
-              <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
-            </svg>
-            <span>Norsk</span>
-          </button>
-          <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">
-            <svg class="flag" viewBox="0 0 60 30" aria-hidden="true" focusable="false">
-              <clipPath id="uk-clip-t"><path d="M0 0v30h60V0z"/></clipPath>
-              <clipPath id="uk-diag-t"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
-              <g clip-path="url(#uk-clip-t)">
-                <path d="M0 0v30h60V0z" fill="#012169"/>
-                <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
-                <path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-diag-t)" stroke="#c8102e" stroke-width="4"/>
-                <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
-                <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
-              </g>
-            </svg>
-            <span>English</span>
-          </button>
-        </div>
-      </div>
       <!-- Leaving the game itself — the hub's one way out, drawn the same in
            every cabinet: LAST in the column, full width, a ghost plate, the
            shared back arrow, sentence case. Stays hidden until screens.js
@@ -320,9 +293,9 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
          Settings face: no RESUME and no LEVELS, a BACK in their place that
          returns to whichever screen it was opened over.
 
-       Either face then carries the same body: the two faders, the honest line
-       about there being nothing to hear, the language row, and the way out to
-       the arcade LAST. There used to be a separate sound panel behind a
+       Either face then carries the same body: the two faders, the language
+       row, a line on what the speaker does, and the way out to the arcade
+       LAST. There used to be a separate sound panel behind a
        speaker in the corner; it folded into this on 2026-10-11, when the
        speaker became a plain mute and the hub's corner became three plates.
        src/ui/screens.js picks the face (openMenu()). -->
@@ -343,12 +316,9 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
            The language row shares the faders' label gutter, so SPRÅK, MUSIKK
            and EFFEKTER all start their controls at the same x.
 
-           THE HINT LINE IS THE POINT. DAM BREAK has no audio whatsoever: no
-           music, no cues, no AudioContext anywhere in the repo. Two sliders
-           that silently did nothing would be a lie, so the line under them
-           says so. What they are for is written in src/ui/sound.js — the
-           levels are stored for real, so the day the water gets a voice it
-           arrives where the player set it. -->
+           The faders drive src/ui/audio.js's MUSIC and EFFECTS buses
+           directly, through the levels src/ui/sound.js stores; dragging one
+           makes a sound on its own bus and lifts the corner's mute. -->
       <div class="vol-rows">
         <div class="vol-row">
           <label class="vol-label" for="vol-music" data-i18n="sound.music">MUSIKK</label>
@@ -365,8 +335,9 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
           </div>
         </div>
         <!-- THE LANGUAGE ROW (hub §2, "Two languages, Norwegian first"),
-             in the menu; the title screen carries its own copy (-t). The
-             clipPath ids carry a suffix because ids are page-global. -->
+             here and only here — the menu panel is where language and sound
+             live in every cabinet. The clipPath ids carry a suffix from the
+             days of a second copy; ids are page-global, so it stays. -->
         <div class="vol-row lang-row">
           <span class="vol-label" id="lang-label-b" data-i18n="menu.lang">SPRÅK</span>
           <div class="lang-seg" role="group" aria-labelledby="lang-label-b">
@@ -396,7 +367,7 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
         </div>
       </div>
 
-      <p class="hint sound-note" data-i18n="sound.note">⚠ DAM BREAK er helt stille ennå. Nivåene lagres likevel, så når vannet får en stemme, kommer den på nivået du valgte.</p>
+      <p class="hint sound-note" data-i18n="sound.note">Musikk og effekter stilles hver for seg. Høyttaleren i hjørnet slår all lyd av og på.</p>
 
       <button class="small-btn quit-btn hidden" id="btn-quit-pause" type="button">
         <svg class="quit-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5m6-6-6 6 6 6"/></svg>
@@ -455,8 +426,8 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
     <!-- A LIVE MUTE: one tap, nothing opened, nothing paused, no focus moved.
          aria-pressed="true" means muted. Both states are in the one <svg> —
          the waves while audible, the slash while muted — and CSS picks off
-         aria-pressed. DAM BREAK has no audio yet, so this stores a choice
-         (src/ui/sound.js) that the water will honour the day it gets a voice. -->
+         aria-pressed. The choice is stored by src/ui/sound.js and src/ui/
+         audio.js turns its master gain down to nothing; the levels survive. -->
     <button id="btn-sound" class="tool-btn" type="button" aria-pressed="false"
             title="Slå av lyden" aria-label="Slå av lyden">
       <svg class="sound-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">

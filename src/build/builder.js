@@ -517,7 +517,8 @@ function placeMember(start, end) {
   B.chainNodeId = b;
   B.selection = null;
   designChanged();
-  emit('design:change', { action: 'place', id: m.id });
+  // `mat` so the mixer can knock timber and clank steel (src/ui/audio.js).
+  emit('design:change', { action: 'place', id: m.id, mat: m.mat });
   return m;
 }
 
@@ -537,6 +538,8 @@ function refuse(reason, end) {
   const kind = budget ? 'budget' : SOCIAL.indexOf(reason) >= 0 ? 'local' : 'bad';
   pulse(kind, end ? end.x : 0, end ? end.y : 0);
   if (budget) hint(reason);
+  // Heard as well as seen: the mixer answers with a soft "nuh-uh".
+  emit('design:refuse', { kind });
 }
 
 export function deleteMember(id) {

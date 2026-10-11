@@ -24,7 +24,26 @@ Works with mouse (drag to build, wheel to zoom, middle-drag to pan) and touch
 
 ## Development
 
-No build step. No dependencies. Vanilla ES modules + Canvas 2D.
+No build step. No dependencies. Vanilla ES modules + Canvas 2D + Web Audio.
+
+- Sound: music and effects are Sonic Pi pieces in `tools/audio/*.rb`, rendered
+  offline with the hub's `tools/audio/render.rb` (needs Sonic Pi and a real
+  audio device), then encoded to `audio/*.m4a` — themes by
+  `tools/audio/encode.mjs`, cues by the hub's `tools/audio/encode-oneshots.mjs`.
+  The `.rb` pieces are the source of truth; `src/ui/audio.js` plays them.
+
+  ```sh
+  SP="/Applications/Sonic Pi.app/Contents/Resources/app/server/native/ruby/bin/ruby"
+  SONIC_PI_PIECES=tools/audio "$SP" ../tools/audio/render.rb /tmp/music \
+    music-title=72 music-build=104 music-flood=104
+  SONIC_PI_PIECES=tools/audio "$SP" ../tools/audio/render.rb /tmp/sfx \
+    tap=1.5 chime=2.5 tick=1.2 place-timber=1.5 place-steel=2 place-concrete=2.5 \
+    place-cable=2 remove=1.5 refuse=1.5 release=4 splash=2 gush=2.5 creak=2 \
+    break-wood=2 break-metal=2.5 break-stone=2.5 win=4.5 fail=4.5
+  node tools/audio/encode.mjs /tmp/music audio
+  node ../tools/audio/encode-oneshots.mjs /tmp/sfx audio
+  ```
+  Adding a sound means adding it to `sw.js`'s precache list too.
 
 - `ARCHITECTURE.md` — the module contract (interfaces, ownership, update order).
 - `node tests/run.js` — headless physics test scenes (structure, water, coupling).

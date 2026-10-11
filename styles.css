@@ -750,14 +750,13 @@ textarea,
   box-shadow: 0 0 10px var(--accent-glow);
 }
 
-/* The honest line, drawn as a margin note against an amber rule — the same
-   colour the HUD uses when it has to correct the player. It is not decoration:
-   this game has no audio at all, and two faders that said nothing about that
-   would be the dishonest part of the panel. */
+/* The line under the faders, drawn as a margin note. It was amber — the HUD's
+   correcting colour — for as long as it had to admit the game was silent; now
+   it only says what the speaker does, so it takes the quiet rule. */
 .sound-note {
   margin: 0 0 16px;
   padding-left: 10px;
-  border-left: 2px solid var(--warn);
+  border-left: 2px solid var(--border-strong);
   line-height: 1.45;
   color: var(--text-dim);
   text-align: left;
@@ -768,7 +767,7 @@ textarea,
    elsewhere: SETTINGS, BACK). The same plate as the result card, so pausing
    reads as another page of the same document. One column, top to bottom: the
    doors back in, the faders and the language row on one label gutter, the
-   honest line, and the way out LAST, full width, a little apart. A grid with
+   speaker note, and the way out LAST, full width, a little apart. A grid with
    align-content: start (the hub's iPad lesson) so no row is ever stretched. */
 .pause-card {
   width: min(420px, 92vw);
@@ -1268,15 +1267,6 @@ textarea,
      sacrificed — so the height comes back out of the gaps around them. */
   .vol-rows { margin: 10px 0 12px; padding-top: 10px; gap: 4px; }
   .sound-note { margin-bottom: 12px; }
-
-  /* THE TITLE'S COLUMN, SIDEWAYS. The language row joined it on 2026-10-11
-     (hub §2: on the start screen itself, as a visible row, above the way
-     out), and that one 44px row ran the column ten pixels off a 390px-tall
-     phone. The pixels come back out of the air between the doors and PLAY's
-     own padding — never out of a 44px target. */
-  #screen-title .title-actions { gap: 7px; }
-  #screen-title .big-btn { padding-block: 10px; }
-  .menu-col > .quit-btn { margin-top: 4px; }
 }
 
 /* ---- RESULT CARD ON A SHORT, WIDE VIEWPORT (landscape phone) ----
@@ -1307,7 +1297,7 @@ textarea,
      two-column grid laid over the existing markup BY GRID AREA. Nothing moves
      in index.html, portrait is untouched, and a tablet — taller than 560px
      whichever way up — keeps the stack. The heading, the doors back in and the
-     honest line go down the left; the faders, the language and the way out
+     speaker note go down the left; the faders, the language and the way out
      down the right, so the way out is still last — bottom right — and a
      390px-tall phone never has to scroll a menu to find it. */
   .pause-card {
