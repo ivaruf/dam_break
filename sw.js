@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.15.0'; // the dam gets a voice: Sonic Pi themes for menu, build and flood, and cues for every beam, break and wave
+const VERSION = 'v2.15.1'; // the update button always lands: a reload follows the tap even when controllerchange never comes
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

@@ -49,6 +49,7 @@ function swVersion(worker) {
 
 let swReg = null;
 let waitingVersion = undefined;   // undefined: nothing offered yet
+let updateAccepted = false;       // the player tapped NY VERSJON KLAR
 
 // The button's words in the current language, with the waiting build's tag.
 // Called again on every language switch, so an offer already on screen follows.
@@ -67,7 +68,16 @@ function offerIfWaiting() {
     btn.classList.remove('hidden');
     waitingVersion = v || null;
     paintUpdate();
-    btn.onclick = () => swReg.waiting && swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    btn.onclick = () => {
+      if (!swReg.waiting) { location.reload(); return; }
+      updateAccepted = true;
+      swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      // controllerchange is the normal way in, but it never comes after a hard
+      // refresh (the page is uncontrolled) or if the waiting worker has gone
+      // redundant, and then the button would sit there doing nothing — read
+      // as "the update is broken". maxgear/js/main.js does the same.
+      setTimeout(() => location.reload(), 3000);
+    };
   });
 }
 
@@ -96,6 +106,8 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     });
   });
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (hadController && game.getScene().phase === 'title') location.reload();
+    // A tap on the update button is a request to reload whatever screen it
+    // was tapped on; otherwise only reload on the title, never mid-run (§1).
+    if (updateAccepted || (hadController && game.getScene().phase === 'title')) location.reload();
   });
 }
