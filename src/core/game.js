@@ -46,6 +46,7 @@ const S = {
   simTime: 0,
   stats: null,          // modes.js owns contents
   testScene: 0,
+  covered: false,       // a menu panel is up over build/sim (screens.js writes it)
 };
 
 let canvas = null;
@@ -81,13 +82,21 @@ function wireEvents() {
   on('ui:release', () => release());
   on('ui:retry', () => retry());
   on('ui:edit', () => toEdit());
-  on('ui:menu', () => setPhase(S.phase === 'title' ? 'title' : 'levelselect'));
+  // The HUD's menu plate opens the pause menu over the run; it used to drop
+  // straight to the level list, which threw the run away in one tap. Leaving
+  // the level is now a button inside that menu (ui:levels).
+  on('ui:menu', () => screens.openPause());
+  on('ui:levels', () => setPhase('levelselect'));
   on('ui:speed', ({ v }) => setSpeed(v));
 
   on('input:pan', ({ dx, dy }) => S.camera && S.camera.pan(dx, dy));
   on('input:zoom', ({ px, py, factor }) => S.camera && S.camera.zoomAt(px, py, factor));
 
   on('input:key', ({ key }) => {
+    // A panel over a run (screens.js keeps S.covered) owns the keyboard: only
+    // Escape, which walks back out of it, and the debug key get through, so a
+    // Space aimed at the menu cannot release or unpause the flood beneath it.
+    if (S.covered && key !== 'Escape' && key !== 'F2') return;
     if (key === ' ') {
       if (S.phase === 'build' && S.level && S.level.mode === 'freebuild') release();
       else if (S.phase === 'sim') setSpeed(S.simSpeed === 0 ? 1 : 0);
@@ -96,13 +105,12 @@ function wireEvents() {
     } else if (key === 'F2') {
       debug.toggle();
     } else if (key === 'Escape') {
-      // The sound panel is a door the corner speaker can open from ANY screen
-      // now, this one included, so Escape has to close it by exactly the door
-      // its BACK button uses before it is allowed to mean anything else — screens.js
-      // owns that door and answers whether there was one to close. Without this
-      // step, Escape over an open panel would abandon the level instead.
-      if (screens.closeSound()) return;
-      if (S.phase === 'sim' || S.phase === 'build') setPhase('levelselect');
+      // One key, one step back, decided in ONE place: screens.js owns which
+      // panel is up, so it owns the whole ladder — sub-panel → its Back, in a
+      // level → the pause menu, pause menu → resume, title → the way out. It
+      // used to leave the level from build or sim, which is the one thing hub
+      // §2 now forbids Escape to do in a single press.
+      screens.escape();
     }
   });
 

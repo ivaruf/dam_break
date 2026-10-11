@@ -132,8 +132,13 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
     </div>
 
     <div id="hud-toast" aria-live="polite"></div>
-    <button id="btn-hud-menu" class="tool-btn" type="button" title="Nivåer (Esc)" aria-label="Nivåer"
-            data-i18n-label="hud.menu" data-i18n-title="hud.menuTitle">☰</button>
+    <!-- The menu plate: the hub's three bars, drawn to the path data every
+         cabinet shares, not a ☰ character the font gets to draw. It opens the
+         pause menu; Escape does the same. -->
+    <button id="btn-hud-menu" class="tool-btn" type="button" title="Meny (Esc)" aria-label="Meny"
+            data-i18n-label="hud.menu" data-i18n-title="hud.menuTitle">
+      <svg class="menu-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
 
     <!-- ==================== THE BOTTOM STACK ====================
          One bottom-anchored flex column owns EVERYTHING at the foot of the
@@ -236,13 +241,24 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
       <div class="logo-rule" aria-hidden="true"><i></i><i></i></div>
       <p class="tagline" data-i18n="title.tagline">Når vannet kommer — holder demningen din?</p>
     </div>
-    <button class="big-btn pulse" id="btn-play" type="button" data-i18n="title.play">▶ SPILL</button>
-    <button class="small-btn" id="btn-sandbox" type="button" data-i18n="title.sandbox">⚒ SANDKASSE</button>
-    <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ NY VERSJON KLAR</button>
-    <!-- Leaving the game itself. Stays hidden until screens.js knows what it
-         can honestly offer — back to the arcade, or closing a window a script
-         is actually allowed to close. See ../arcade/exit.js. -->
-    <button class="small-btn quit-btn hidden" id="btn-quit" type="button"></button>
+    <!-- One column of doors, laid out as one (hub §2, "anything that is one
+         logical group is laid out as one"): a grid that stretches every member
+         to the widest, so PLAY, SANDBOX and the way out share both edges. -->
+    <div class="menu-col title-actions">
+      <button class="big-btn pulse" id="btn-play" type="button" data-i18n="title.play">▶ SPILL</button>
+      <button class="small-btn" id="btn-sandbox" type="button" data-i18n="title.sandbox">⚒ SANDKASSE</button>
+      <button class="small-btn update-btn hidden" id="btn-update" type="button">⬆ NY VERSJON KLAR</button>
+      <!-- Leaving the game itself — the hub's one way out, drawn the same in
+           every cabinet: LAST in the column, full width, a ghost plate, the
+           shared back arrow, sentence case. Stays hidden until screens.js
+           knows what it can honestly offer — back to the arcade, or closing a
+           window a script is actually allowed to close. See ../arcade/exit.js.
+           Escape on this screen presses it (src/ui/screens.js, escape()). -->
+      <button class="small-btn quit-btn hidden" id="btn-quit" type="button">
+        <svg class="quit-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5m6-6-6 6 6 6"/></svg>
+        <span class="quit-label"></span>
+      </button>
+    </div>
     <p class="hint" data-i18n="title.hint">Dra for å bygge · knip eller rull for å zoome · mellomrom slipper flommen</p>
     <span id="game-version" class="version-tag"></span>
   </div>
@@ -253,43 +269,14 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
       <p id="levels-progress" class="tagline"></p>
     </div>
     <div id="level-grid"></div>
-    <!-- The foot of the level screen: language, BACK and the way out, in one
-         box so the short-landscape pass can lay them in a row instead of
-         stacking three 44px rows under a grid that needs the height. -->
+    <!-- The foot of the level screen is BACK and nothing else now. It used to
+         carry the language row and a second way out as well, because the HUD's
+         menu button opened this screen mid-run; that button opens the pause
+         menu instead (#screen-pause below), which is where both went. This
+         screen is a second panel off the title, and the hub keeps the way out
+         off second panels — Escape, Escape walks to it instead. -->
     <div class="levels-foot">
-      <!-- The same language row, because this screen is what the HUD's ☰ opens.
-           Its flag ids end -b; the sound panel's end -a. -->
-      <div class="lang-row lang-row-levels">
-        <span class="vol-label" id="lang-label-b" data-i18n="menu.lang">SPRÅK</span>
-        <div class="lang-seg" role="group" aria-labelledby="lang-label-b">
-          <button type="button" class="lang-btn" data-lang="nb" lang="nb" aria-pressed="true">
-            <svg class="flag" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
-              <rect width="22" height="16" fill="#ba0c2f"/>
-              <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
-              <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
-            </svg>
-            <span>Norsk</span>
-          </button>
-          <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">
-            <svg class="flag" viewBox="0 0 60 30" aria-hidden="true" focusable="false">
-              <clipPath id="uk-clip-b"><path d="M0 0v30h60V0z"/></clipPath>
-              <clipPath id="uk-diag-b"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
-              <g clip-path="url(#uk-clip-b)">
-                <path d="M0 0v30h60V0z" fill="#012169"/>
-                <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
-                <path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-diag-b)" stroke="#c8102e" stroke-width="4"/>
-                <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
-                <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
-              </g>
-            </svg>
-            <span>English</span>
-          </button>
-        </div>
-      </div>
       <button class="small-btn" id="btn-levels-back" type="button" data-i18n="menu.back">TILBAKE</button>
-      <!-- The same way out, repeated here because this screen is what the in-game
-           ☰ opens: leaving should never be three taps deep. -->
-      <button class="small-btn quit-btn hidden" id="btn-quit-levels" type="button"></button>
     </div>
   </div>
 
@@ -334,8 +321,8 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
              Here because this panel is what the corner speaker opens from the
              title screen, so a stranger finds English before a single level.
              The flags are kitchens' two SVGs to the path; the clipPath ids
-             carry a suffix, because the same row is repeated on the level
-             screen and ids are page-global. Endonyms stay in their own
+             carry a suffix, because the same row is repeated in the pause
+             menu and ids are page-global. Endonyms stay in their own
              language whatever the current one is. -->
         <div class="vol-row lang-row">
           <span class="vol-label" id="lang-label-a" data-i18n="menu.lang">SPRÅK</span>
@@ -370,6 +357,62 @@ html[lang="en"] #splash .sp-nb,html:not([lang="en"]) #splash .sp-en{display:none
       <p class="hint sound-note" data-i18n="sound.note">⚠ DAM BREAK er helt stille — ingen musikk, ingen lyder, ingenting disse to glidebryterne kan skru på i dag. De blir likevel lagret på denne enheten, så når vannet en dag får en stemme, kommer den på nivået du valgte og ikke på full guffe.</p>
 
       <button class="small-btn" id="btn-sound-back" type="button" data-i18n="menu.back">TILBAKE</button>
+    </div>
+  </div>
+
+  <!-- ==================== THE IN-PLAY MENU ====================
+       What the HUD's three-bar plate opens, and what Escape opens mid-level.
+       It PAUSES: the flood stops (sim) and the countdown stops (build) for as
+       long as it is up, and closing it — RESUME, Escape, or the plate's own
+       Escape — puts the speed back exactly as it was, so the run carries on
+       where it was left. Leaving the level is a button here (LEVELS), never a
+       keystroke: Escape must not throw a run away in one press (hub §1).
+
+       Top level, one column, the hub's order: the way back in first, the
+       language row (hub §2 wants it in this menu), and the way out to the
+       arcade LAST, full width, a little apart from the rest. -->
+  <div id="screen-pause" class="screen hidden">
+    <div class="end-card pause-card">
+      <div class="screen-head">
+        <h2 data-i18n="pause.title">PAUSE</h2>
+      </div>
+      <div class="menu-col pause-actions">
+        <button class="big-btn primary-btn" id="btn-pause-resume" type="button" data-i18n="pause.resume">▶ FORTSETT</button>
+        <button class="small-btn" id="btn-pause-levels" type="button" data-i18n="result.levels">NIVÅER</button>
+        <!-- The language row, moved here from the level screen with its -b
+             flag ids; the sound panel's copy keeps -a. -->
+        <div class="vol-row lang-row">
+          <span class="vol-label" id="lang-label-b" data-i18n="menu.lang">SPRÅK</span>
+          <div class="lang-seg" role="group" aria-labelledby="lang-label-b">
+            <button type="button" class="lang-btn" data-lang="nb" lang="nb" aria-pressed="true">
+              <svg class="flag" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
+                <rect width="22" height="16" fill="#ba0c2f"/>
+                <path d="M6 0h4v16H6zM0 6h22v4H0z" fill="#fff"/>
+                <path d="M7 0h2v16H7zM0 7h22v2H0z" fill="#00205b"/>
+              </svg>
+              <span>Norsk</span>
+            </button>
+            <button type="button" class="lang-btn" data-lang="en" lang="en" aria-pressed="false">
+              <svg class="flag" viewBox="0 0 60 30" aria-hidden="true" focusable="false">
+                <clipPath id="uk-clip-b"><path d="M0 0v30h60V0z"/></clipPath>
+                <clipPath id="uk-diag-b"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath>
+                <g clip-path="url(#uk-clip-b)">
+                  <path d="M0 0v30h60V0z" fill="#012169"/>
+                  <path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/>
+                  <path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-diag-b)" stroke="#c8102e" stroke-width="4"/>
+                  <path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/>
+                  <path d="M30 0v30M0 15h60" stroke="#c8102e" stroke-width="6"/>
+                </g>
+              </svg>
+              <span>English</span>
+            </button>
+          </div>
+        </div>
+        <button class="small-btn quit-btn hidden" id="btn-quit-pause" type="button">
+          <svg class="quit-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 12H5m6-6-6 6 6 6"/></svg>
+          <span class="quit-label"></span>
+        </button>
+      </div>
     </div>
   </div>
 

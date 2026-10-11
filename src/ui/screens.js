@@ -24,11 +24,20 @@ const el = (id) => document.getElementById(id);
 // phase.
 let current = 'screen-title';
 let soundReturn = null;
+let pauseSpeed = null;   // the run's speed when the pause menu opened; see openPause()
 
 function show(id) {
   for (const s of document.querySelectorAll('.screen')) s.classList.add('hidden');
   if (id) { const n = el(id); if (n) n.classList.remove('hidden'); }
   current = id || null;
+  // Whether a panel is standing over a level in progress — the pause menu, or
+  // the sound panel opened mid-run. Written HERE, the one place screens change,
+  // and read by game.js and builder.js before they act on a key: a keystroke
+  // meant for the menu (or a Space while it is up) must not also release the
+  // flood, unpause it, or edit the dam hidden underneath.
+  const scene = getScene();
+  if (scene) scene.covered = !!current && (scene.phase === 'build' || scene.phase === 'sim');
+  if (current !== 'screen-pause' && current !== 'screen-sound') pauseSpeed = null;
   // Anything that raises another screen — a phase change, a level starting —
   // has closed the sound panel by hiding it, so the way back out of it must not
   // survive as a stale promise to return somewhere the player has left.
@@ -116,7 +125,9 @@ function dismissSplash() {
 // ---- leaving the game ---------------------------------------------------
 
 /**
- * The quit buttons on the title and level screens.
+ * The quit buttons: one on the title screen and one in the pause menu, each at
+ * the top level and last in its column (hub §2, "One button"). Never on the
+ * level list, the sound panel or any other second panel.
  *
  * They stay hidden unless the arcade's exit.js is actually there to answer,
  * because it is another repository's file and is allowed to be missing — and
@@ -146,7 +157,7 @@ function wireQuit() {
    * been in exit.js since the file existed. */
   if (!(exit.framed() || exit.standalone())) return;
 
-  for (const id of ['btn-quit', 'btn-quit-levels']) {
+  for (const id of ['btn-quit', 'btn-quit-pause']) {
     const button = el(id);
     if (!button) continue; // the stub DOM in tests/ carries only what it needs
     quitButtons.push(button);
@@ -179,7 +190,21 @@ function paintQuit() {
     app: t('exit.close'),
     tab: t('exit.close'),
   });
-  for (const b of quitButtons) b.textContent = b.dataset.refused ? t('exit.refused') : label;
+  // Only the words are repainted: the back-arrow SVG beside them is markup
+  // and must survive every switch of language.
+  for (const b of quitButtons) {
+    const words = b.querySelector ? b.querySelector('.quit-label') : null;
+    (words || b).textContent = b.dataset.refused ? t('exit.refused') : label;
+  }
+}
+
+/** Escape on the title screen is the way out — the same quit(), and only when
+ *  the button is actually showing, so the key can never do what the screen
+ *  does not offer. */
+function quitFromTitle() {
+  const b = el('btn-quit');
+  if (!b || b.classList.contains('hidden') || b.disabled) return;
+  b.click();
 }
 
 // ---- the language row -----------------------------------------------------
@@ -187,7 +212,7 @@ function paintQuit() {
 // Two copies of it, both plain markup in index.html: one in the sound panel —
 // the panel the corner speaker opens from the title screen, from the level
 // list and mid-run, so a stranger can find English before a single level —
-// and one on the level screen, which is what the HUD's ☰ opens. Every
+// and one in the pause menu, which is what the HUD's menu plate opens. Every
 // [data-lang] button in the page is wired here; aria-pressed is the only state
 // and CSS reads it.
 function paintLangButtons() {
@@ -287,6 +312,71 @@ export function closeSound() {
   return true;
 }
 
+// ---- the in-play menu ----------------------------------------------------
+//
+// What the HUD's three-bar plate opens, and what Escape opens mid-level. It
+// stops the run — speed 0 through the same ui:speed channel the ⏸ button uses,
+// which also freezes a countdown build, because build ticks on the same speed —
+// and remembers the speed it found, so closing it puts the run back exactly as
+// it was: a 2× flood resumes at 2×, an already-paused one stays paused. The
+// remembered speed survives a detour through the sound panel (the corner is
+// live over this menu) and is forgotten the moment any other screen comes up.
+// (`pauseSpeed` itself is declared at the top, beside `current`.)
+
+export function openPause() {
+  const scene = getScene();
+  if (!scene || (scene.phase !== 'build' && scene.phase !== 'sim')) return;
+  if (current === 'screen-pause') return;
+  if (current !== 'screen-sound') pauseSpeed = scene.simSpeed;
+  emit('ui:speed', { v: 0 });
+  emit('ui:pause', {});   // builder.js drops any drag in flight
+  show('screen-pause');
+  const resume = el('btn-pause-resume');
+  if (resume && typeof resume.focus === 'function') resume.focus();
+}
+
+export function closePause() {
+  if (current !== 'screen-pause') return false;
+  const speed = pauseSpeed;
+  show(null);
+  if (speed !== null) emit('ui:speed', { v: speed });
+  return true;
+}
+
+/**
+ * Escape, the whole ladder, in one place (hub §2, "Escape goes one step back,
+ * and from the start screen that step is the arcade"). game.js calls this and
+ * nothing else on Escape; input.js has already swallowed the key's default.
+ *
+ *   sound panel           → its BACK (to wherever it was opened from)
+ *   pause menu            → close it, the run carries on
+ *   level list            → its BACK, to the title
+ *   result card           → LEVELS, the card's own way back
+ *   a level, nothing open → open the pause menu (and pause)
+ *   title, nothing open   → the way out, only if that button is showing
+ *
+ * So no single press ever throws a run away, and Escape, Escape from anywhere
+ * lands on the title, which has the way out on it.
+ */
+export function escape() {
+  if (closeSound()) return;
+  if (closePause()) return;
+  if (current === 'screen-levels') { show('screen-title'); return; }
+  if (current === 'screen-result') { buildLevelGrid(); show('screen-levels'); return; }
+  const scene = getScene();
+  if (!current && scene && (scene.phase === 'build' || scene.phase === 'sim')) { openPause(); return; }
+  if (current === 'screen-title') quitFromTitle();
+}
+
+function wirePause() {
+  const resume = el('btn-pause-resume');
+  if (resume) resume.addEventListener('click', closePause);
+  // Leaving the level is a deliberate tap here, never a keystroke — the same
+  // destination the menu plate used to jump straight to.
+  const levels = el('btn-pause-levels');
+  if (levels) levels.addEventListener('click', () => emit('ui:levels', {}));
+}
+
 function wireSound() {
   wireFader('vol-music', 'vol-music-out', sound.music, sound.setMusic);
   wireFader('vol-sfx', 'vol-sfx-out', sound.sfx, sound.setSfx);
@@ -317,6 +407,7 @@ export function init() {
   });
 
   wireQuit();
+  wirePause();
   wireSound();
   wireLang();
 

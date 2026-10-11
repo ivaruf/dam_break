@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.12.0'; // the dam speaks Norwegian first and English on request — switched live from the sound panel or the level screen
+const VERSION = 'v2.13.0'; // one way out, drawn like every other cabinet's — and the menu plate and Escape pause the run instead of abandoning it
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [

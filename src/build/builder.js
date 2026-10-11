@@ -267,6 +267,11 @@ export function initBuilder() {
   // Leaving the build phase ends everything in flight, the armed run included:
   // a reach circle over a running simulation is a promise nothing can keep.
   on('phase:change', ({ phase }) => { if (phase !== 'build') { cancelDrag(); disarm(); } });
+  // Escape can open the pause menu in the middle of a drag, and the finger's
+  // release then lands under the menu: drop the drag (a half-dragged marquee
+  // deletes nothing) rather than let it complete out of sight. The armed run
+  // stays — the build is only paused, not left.
+  on('ui:pause', () => cancelDrag());
 }
 
 export function startLevel(level, terrain, design) {
@@ -1172,6 +1177,9 @@ function clearMarquee() {
 function onKey({ key }) {
   const S = getScene();
   if (S.phase !== 'build') return;
+  // The pause or sound panel is over the build: the keys are the menu's, not
+  // the dam's (screens.js writes S.covered whenever a screen changes).
+  if (S.covered) return;
 
   const list = materialList();
   const i = parseInt(key, 10);
@@ -1180,9 +1188,8 @@ function onKey({ key }) {
   switch (key) {
     case 'e': case 'E': setTool(B.tool === 'erase' ? 'build' : 'erase'); break;
     // X toggles the section box. Escape is deliberately NOT bound here: game.js
-    // already leaves the level on Escape from the build phase, and the
-    // phase:change that follows cancels the drag (marquee discarded, nothing
-    // deleted). Two meanings on one key would be worse than none.
+    // owns Escape (it opens the pause menu from the build phase), and two
+    // meanings on one key would be worse than none.
     case 'x': case 'X': setTool(B.tool === 'boxdelete' ? 'build' : 'boxdelete'); break;
     case 'b': case 'B': setTool('build'); break;
     case 'z': undo(); break;

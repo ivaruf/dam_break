@@ -109,8 +109,17 @@ export function initInput(canvas, camera) {
 
   window.addEventListener('keydown', (e) => {
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    // A focused field keeps its keys — except Escape, which is the hub's "one
+    // step back" from anywhere, a focused volume fader included.
+    const field = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+    if (field && e.key !== 'Escape') return;
+    // Escape's default is swallowed as well as Space's: game.js gives it a
+    // meaning on every screen, and the press must do that one thing only.
+    if (e.key === ' ' || e.key === 'Escape') e.preventDefault();
+    // A held Escape auto-repeats, and each repeat is one more step back: two
+    // would open the pause menu and shut it again, three would walk from a
+    // panel clean out of the game. One press, one step.
+    if (e.key === 'Escape' && e.repeat) return;
     emit('input:key', { key: e.key, code: e.code });
-    if (e.key === ' ') e.preventDefault();
   });
 }

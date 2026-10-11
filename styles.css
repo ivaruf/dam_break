@@ -186,17 +186,53 @@ textarea,
 
 .update-btn { border-color: var(--good); color: var(--good); background: var(--surface-2); animation: update-glow 2.4s ease-in-out infinite; }
 
-/* Leaving the game, as opposed to leaving a level. Deliberately the quietest
-   control on the screen: findable, and never competing with PLAY. */
+/* Leaving the game, as opposed to leaving a level — the hub's one way out,
+   which since 2026-10-11 looks and behaves the same in every cabinet (hub §2,
+   "One button"). A GHOST plate: the toolbar's rim with nothing poured into it,
+   because leaving is never the recommended action and must not compete with
+   PLAY; but a visible rim, because it was borderless until then and a way out
+   that looks like a caption is one nobody finds. The shared back arrow sits in
+   front of the words, stroked like the corner glyphs (1.9, round caps), and
+   the words are sentence case — no ◂ and no capitals, for this button only.
+   [hidden]-style hiding is .hidden here, which is display:none !important, so
+   the inline-flex below cannot resurrect it on a browser that should not see
+   it. */
 .quit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   background: transparent;
-  border-color: transparent;
+  border-color: var(--border-strong);
   color: var(--text-dim);
   box-shadow: none;
 }
+.quit-glyph {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .quit-btn:not(:disabled):hover,
-.quit-btn:focus-visible { color: var(--text); border-color: var(--border); }
+.quit-btn:focus-visible { color: var(--text); border-color: var(--accent); }
 .quit-btn:disabled { opacity: 0.7; }
+
+/* A menu's column of doors, laid out as one: a grid that stretches every
+   member to the widest, so the column has two shared edges and no magic width
+   to keep in step with the longest Norwegian label (maxgear's .title-actions).
+   The way out is always its last member and stands a little apart, so it is
+   found in the same place every time and never read as one more setting. */
+.menu-col {
+  display: grid;
+  justify-items: stretch;
+  gap: 10px;
+  width: min(100%, 340px);
+}
+.menu-col > .quit-btn { margin-top: 8px; }
 
 .big-btn.release {
   background: var(--release-bg);
@@ -378,19 +414,15 @@ textarea,
    fill the space between header and BACK — pull the header text and the
    BACK button back to a natural centred width instead of stretching them */
 #screen-levels > .screen-head { align-self: center; }
-/* The foot (language row, BACK, the way out) is one centred column here and
-   one wrapping row on a short landscape viewport, further down. */
+/* The foot is BACK alone now — the language row and the way out moved to the
+   pause menu when the HUD's menu plate stopped opening this screen. */
 .levels-foot {
   align-self: center;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  width: min(100%, 420px);
 }
-.levels-foot > .lang-row { width: 100%; }
-.lang-row-levels { display: flex; align-items: center; column-gap: 12px; }
 #levels-progress { margin-bottom: 2px; }
 
 #level-grid {
@@ -723,6 +755,16 @@ textarea,
 }
 #btn-sound-back { display: block; width: 100%; }
 
+/* ==================== THE IN-PLAY MENU ====================
+   The same plate as the sound panel and the result card, so pausing reads as
+   another page of the same document. One .menu-col down the middle: RESUME,
+   LEVELS, the language row, and the way out last. The language row keeps the
+   sound panel's label gutter (it is a .vol-row) so SPRÅK sits where it does
+   there. */
+.pause-card { width: min(400px, 92vw); }
+.pause-card .menu-col { width: 100%; margin-top: 12px; }
+.pause-card .lang-row { padding-top: 10px; border-top: 1px solid var(--border); }
+
 /* ---- THE LANGUAGE ROW ----
    Two equal plates in one segmented row, Norsk first, each a flag and its
    endonym. The same plate as a .tool-btn — surface, rim, and the accent rim
@@ -1045,12 +1087,19 @@ textarea,
   padding: clamp(10px, 2.8vw, 15px) clamp(14px, 4vw, 26px);
 }
 
-/* ☰ LEVELS: one row under the fixed corner cluster and flush with its right
+/* ☰ MENU (it opened the level list until 2026-10-11, and opens the pause menu
+   now): one row under the fixed corner cluster and flush with its right
    edge, so the two read as one column of controls rather than two things
    fighting for one corner. It belongs to a RUN — it exists only while #hud
    does — which is why it is the one that gave way; the pair above it belongs
    to the page and is always there. Both offsets derive from the corner tokens
    (see the tokens block), so shrinking the plates moves this up with them. */
+#btn-hud-menu > svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+}
 #btn-hud-menu {
   position: absolute;
   right: calc(var(--corner-inset) + env(safe-area-inset-right, 0px));
@@ -1225,11 +1274,6 @@ textarea,
      sacrificed — so the height comes back out of the gaps around them. */
   .vol-rows { margin: 10px 0 12px; padding-top: 10px; gap: 4px; }
   .sound-note { margin-bottom: 12px; }
-  /* The level screen's foot becomes one wrapping row: language, BACK and the
-     way out side by side, so the grid keeps two rows of height it would
-     otherwise spend on three stacked 44px controls. */
-  .levels-foot { flex-direction: row; flex-wrap: wrap; justify-content: center; width: min(100%, 900px); gap: 8px; }
-  .levels-foot > .lang-row { width: auto; flex: 0 1 360px; }
 }
 
 /* ---- RESULT CARD ON A SHORT, WIDE VIEWPORT (landscape phone) ----

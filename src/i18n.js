@@ -3,7 +3,7 @@
 // Two languages, bokmål first (hub CLAUDE.md §2, "Two languages, Norwegian
 // first"). With nothing valid stored the game speaks Norwegian WHATEVER the
 // browser prefers — no navigator.language sniffing; an English speaker is one
-// tap away, on the language row in the sound panel or the level screen.
+// tap away, on the language row in the sound panel or the pause menu.
 //
 // THE CHOICE IS THE HUB'S, NOT THIS CABINET'S. It lives under the one key every
 // arcade game shares, 'arcade.lang.v1', holding "nb" or "en" and nothing else,
@@ -158,9 +158,11 @@ const STRINGS = {
     'menu.back': 'TILBAKE',
     'menu.lang': 'SPRÅK',
     'menu.langGroup': 'Språk',
-    'exit.arcade': '◂ TILBAKE TIL ARKADEN',
-    'exit.close': '✕ LUKK',
-    'exit.refused': 'LUKK FANEN SELV',
+    // The way out is in sentence case and carries no glyph in its words — the
+    // back arrow is an SVG in the button (hub §2, "One button").
+    'exit.arcade': 'Tilbake til arkaden',
+    'exit.close': 'Lukk',
+    'exit.refused': 'Lukk fanen selv',
     'update.ready': '⬆ NY VERSJON KLAR',
 
     // ---- title ----
@@ -193,8 +195,10 @@ const STRINGS = {
 
     // ---- corner + HUD chrome ----
     'corner.sound': 'Lyd',
-    'hud.menu': 'Nivåer',
-    'hud.menuTitle': 'Nivåer (Esc)',
+    'hud.menu': 'Meny',
+    'hud.menuTitle': 'Meny (Esc)',
+    'pause.title': 'PAUSE',
+    'pause.resume': '▶ FORTSETT',
     'hud.floodArrives': 'FLOMMEN KOMMER',
     'hud.leftOf': 'IGJEN AV',
     'hud.peakLoad': 'MAKS LAST',
@@ -398,9 +402,9 @@ const STRINGS = {
     'menu.back': 'BACK',
     'menu.lang': 'LANGUAGE',
     'menu.langGroup': 'Language',
-    'exit.arcade': '◂ BACK TO ARCADE',
-    'exit.close': '✕ CLOSE',
-    'exit.refused': 'CLOSE THIS TAB YOURSELF',
+    'exit.arcade': 'Back to arcade',
+    'exit.close': 'Close',
+    'exit.refused': 'Close this tab yourself',
     'update.ready': '⬆ UPDATE READY',
 
     'title.tagline': 'When the water arrives — will your dam hold?',
@@ -429,8 +433,10 @@ const STRINGS = {
     'sound.note': '⚠ DAM BREAK ships silent — no music, no cues, nothing these two sliders can move today. They are saved to this device anyway, so when the water finally gets a voice it arrives at the level you chose rather than at full blast.',
 
     'corner.sound': 'Sound',
-    'hud.menu': 'Levels',
-    'hud.menuTitle': 'Levels (Esc)',
+    'hud.menu': 'Menu',
+    'hud.menuTitle': 'Menu (Esc)',
+    'pause.title': 'PAUSED',
+    'pause.resume': '▶ RESUME',
     'hud.floodArrives': 'FLOOD ARRIVES',
     'hud.leftOf': 'LEFT OF',
     'hud.peakLoad': 'PEAK LOAD',
