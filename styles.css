@@ -1352,6 +1352,22 @@ textarea,
   .level-card[aria-disabled="true"]:hover { border-color: var(--border-strong); transform: none; }
 }
 
+/* ==================== THE OPENING STING ====================
+   src/intro.js's canvas, which the script creates and removes. Above
+   everything, the inline splash (z-index 100) and the corner plates
+   included, because it is a curtain over the whole page for its three
+   seconds; a tap anywhere on it skips, and touch-action keeps that tap from
+   becoming a scroll or a zoom. Reduced motion never creates it at all. */
+#intro {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 110;
+  touch-action: none;
+  cursor: pointer;
+}
+
 /* ==================== REDUCED MOTION ==================== */
 @media (prefers-reduced-motion: reduce) {
   .pulse, .big-btn.release, #hud-timer.urgent, .toast, #splash .sp-water span, .update-btn {

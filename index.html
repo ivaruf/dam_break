@@ -43,6 +43,17 @@
 </head>
 <body>
 
+<!-- The opening sting: a flood wave hits a timber dam, the dam goes, and the
+     wordmark slams down where the title keeps it — about three seconds,
+     skipped by any tap or key; see the file. ASYNC AND FIRST IN THE BODY, not
+     deferred in the head: a deferred script waits for the whole document,
+     and the point is to be running before the module graph is, so that its
+     capture-phase key listener is registered ahead of every one of the
+     game's. Async never blocks the parser, so the splash below still paints
+     on the first frame; the sting is a curtain above it (styles.css #intro),
+     and with reduced motion it does nothing and the splash is all there is. -->
+<script src="src/intro.js" async></script>
+
 <!-- ==================== SPLASH ====================
      Deliberately inline, markup AND style, and placed before the module script:
      it must paint on the very first frame the browser composites, with no

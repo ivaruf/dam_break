@@ -85,6 +85,11 @@ OPUS C — Rendering, UX & Content:
                                by index.html as its own module script, imports
                                nothing and exports nothing, and is NOT named
                                fullscreen.js for the reason in its header)
+  src/intro.js                (the opening sting: a classic async script at
+                               the top of <body>, imports nothing, draws its
+                               own canvas over the splash and the title for
+                               ~3 s, skipped by any tap or key, and removes
+                               itself; does nothing under reduced motion)
   src/i18n.js                 (every word a player reads, bokmål + English;
                                nb is the default, the choice is the hub-wide
                                key arcade.lang.v1. Level/material English

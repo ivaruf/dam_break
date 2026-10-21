@@ -4,7 +4,7 @@
 // "UPDATE READY" button on the title screen (main.js sends SKIP_WAITING).
 // All paths RELATIVE so the app works from a GitHub Pages subpath.
 
-const VERSION = 'v2.15.1'; // the update button always lands: a reload follows the tap even when controllerchange never comes
+const VERSION = 'v2.16.0'; // an opening sting: a flood wave breaks a timber dam and the wordmark slams down where the title keeps it
 const CACHE = `dambreak-${VERSION}`;
 
 const ASSETS = [
@@ -17,6 +17,8 @@ const ASSETS = [
   './styles.css',
   './src/main.js',
   './src/touch-guard.js',
+  // Classic and async from the top of <body>, so nothing imports it either.
+  './src/intro.js',
   './src/i18n.js',
   './src/config.js',
   './src/core/game.js',
